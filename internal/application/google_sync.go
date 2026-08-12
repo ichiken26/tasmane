@@ -21,6 +21,24 @@ type GoogleQueue interface {
 	Enqueue(context.Context, GoogleJob) error
 }
 type GoogleJobs struct{ Queue GoogleQueue }
+type GoogleQueryRepository interface {
+	ListGoogleConflicts(context.Context, string) ([]domain.GoogleConflictRecord, error)
+	ListGoogleImportCandidates(context.Context, string) ([]domain.GoogleImportCandidate, error)
+}
+type GoogleQueries struct{ Repo GoogleQueryRepository }
+
+func (q GoogleQueries) Conflicts(ctx context.Context, userID string) ([]domain.GoogleConflictRecord, error) {
+	if userID == "" {
+		return nil, domain.ErrForbidden
+	}
+	return q.Repo.ListGoogleConflicts(ctx, userID)
+}
+func (q GoogleQueries) ImportCandidates(ctx context.Context, userID string) ([]domain.GoogleImportCandidate, error) {
+	if userID == "" {
+		return nil, domain.ErrForbidden
+	}
+	return q.Repo.ListGoogleImportCandidates(ctx, userID)
+}
 
 func (j GoogleJobs) Enqueue(ctx context.Context, userID, taskID string, action GoogleJobAction) error {
 	if userID == "" || action == "" {

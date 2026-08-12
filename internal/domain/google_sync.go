@@ -20,6 +20,16 @@ type GoogleJob struct {
 	Action  GoogleJobAction `json:"action"`
 	Attempt int             `json:"attempt"`
 }
+type GoogleConflictRecord struct {
+	TaskID  string `json:"taskId"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+type GoogleImportCandidate struct {
+	GoogleTaskListID string `json:"googleTaskListId"`
+	GoogleTaskID     string `json:"googleTaskId"`
+	Snapshot         []byte `json:"snapshot"`
+}
 
 type GoogleFailureAction string
 

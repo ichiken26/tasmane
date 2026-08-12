@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+func (p *Postgres) Enqueue(ctx context.Context, j domain.GoogleJob) error {
+	id, e := p.ids.New()
+	if e != nil {
+		return e
+	}
+	var taskID any
+	if j.TaskID != "" {
+		taskID = j.TaskID
+	}
+	_, e = p.database.ExecContext(ctx, `INSERT INTO google_sync_jobs(id,user_id,task_id,action,attempt)VALUES($1,$2,$3,$4,$5)`, id, j.UserID, taskID, j.Action, j.Attempt)
+	return e
+}
+
 type GoogleIntegration struct {
 	ID, UserID, GoogleSubject, EncryptedRefreshToken string
 	TaskListID                                       *string
@@ -102,21 +115,32 @@ func (p *Postgres) setSyncStatus(ctx context.Context, j domain.GoogleJob, status
 	return nil
 }
 
-type GoogleImportCandidate struct {
-	GoogleTaskListID, GoogleTaskID string
-	Snapshot                       []byte
-}
-
-func (p *Postgres) ListGoogleImportCandidates(ctx context.Context, userID string) ([]GoogleImportCandidate, error) {
+func (p *Postgres) ListGoogleImportCandidates(ctx context.Context, userID string) ([]domain.GoogleImportCandidate, error) {
 	rows, e := p.database.QueryContext(ctx, `SELECT google_task_list_id,google_task_id,last_synced_snapshot FROM google_task_syncs WHERE user_id=$1 AND task_id IS NULL ORDER BY google_task_id`, userID)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
-	out := []GoogleImportCandidate{}
+	out := []domain.GoogleImportCandidate{}
 	for rows.Next() {
-		var v GoogleImportCandidate
+		var v domain.GoogleImportCandidate
 		if e := rows.Scan(&v.GoogleTaskListID, &v.GoogleTaskID, &v.Snapshot); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (p *Postgres) ListGoogleConflicts(ctx context.Context, userID string) ([]domain.GoogleConflictRecord, error) {
+	rows, e := p.database.QueryContext(ctx, `SELECT task_id,COALESCE(last_error_code,'CONFLICT'),COALESCE(last_error_message,'') FROM google_task_syncs WHERE user_id=$1 AND status='CONFLICT' ORDER BY updated_at DESC`, userID)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []domain.GoogleConflictRecord{}
+	for rows.Next() {
+		var v domain.GoogleConflictRecord
+		if e := rows.Scan(&v.TaskID, &v.Code, &v.Message); e != nil {
 			return nil, e
 		}
 		out = append(out, v)

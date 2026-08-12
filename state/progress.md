@@ -172,3 +172,10 @@
 - Google due-date parsing preserves the local Task's timezone and hh:mm while rejecting malformed dates; ancestor extension remains a conflict through the shared date planner.
 - Remote Google deletion is classified as CONFLICT and never deletes the local Task automatically.
 - Google uncomplete uses the Task FSM and the PostgreSQL implementation atomically reopens the completed target and every completed ancestor, writing `GOOGLE_TASKS` status history for each mutation.
+## 2026-08-13 — Phase 6 MCP server
+
+- Added a stdio JSON-RPC MCP server supporting initialize, tools/list, and tools/call with a trusted per-process user context.
+- Converted every manifest input definition to a strict MCP JSON Schema and added a test proving all 25 declared tools have implementations and none exposes delete.
+- Tool calls invoke the same Task, Catalog, Relation, Confirmation, and Google Application use cases as HTTP; Domain completion/cycle/tenant rules are not duplicated or bypassed.
+- Added a production MCP command backed by PostgreSQL and a durable Google sync job table/queue adapter via additive migration 0005.
+- Fresh PostgreSQL and full Go race suites pass.

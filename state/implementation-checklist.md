@@ -66,9 +66,9 @@
 
 ## Phase 6 MCP
 - [x] OpenAPI/MCP contract completeness
-- [ ] MCP server
-- [ ] tool schemas
-- [ ] shared usecases
+- [x] MCP server
+- [x] tool schemas
+- [x] shared usecases
 - [x] no delete tools
 - [x] tests prove no delete exposure
 
