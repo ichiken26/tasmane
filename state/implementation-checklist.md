@@ -24,10 +24,10 @@
 - [x] Priority calculator
 - [x] TaskScore calculator + reasons
 - [x] Confirmation FSM/score
-- [ ] Overdue/fire projection
-- [ ] Date propagation impact calculator
-- [ ] Parent persistence uses status + derived progress (no parent leaf_progress)
-- [ ] Resolved OD-001/002/003/005/006/007/008 behaviors covered by tests
+- [x] Overdue/fire projection
+- [x] Date propagation impact calculator
+- [x] Parent persistence uses status + derived progress (no parent leaf_progress)
+- [x] Resolved OD-001/002/003/005/006/007/008 behaviors covered by tests
 
 ## Phase 3 Repository / UseCases
 - [ ] Task repository

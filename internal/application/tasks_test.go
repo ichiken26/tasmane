@@ -27,3 +27,19 @@ func TestTransitionOwnershipOptimisticLockAndGoogleInvariant(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTransitionClearsParentLeafProgressAtPersistenceBoundary(t *testing.T) {
+	r := repository.NewMemory(domain.Task{
+		ID: "parent", UserID: "u1", Status: domain.NotStarted,
+		Progress: intPointerForApplication(80), HasChildren: true, Version: 1,
+	})
+	got, err := (Tasks{Repo: r}).Transition(context.Background(), "u1", "parent", 1, domain.InProgress, "WEB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.InProgress || got.Progress != nil || r.Tasks["parent"].Progress != nil {
+		t.Fatalf("derived parent progress reached persistence: returned=%+v stored=%+v", got, r.Tasks["parent"])
+	}
+}
+
+func intPointerForApplication(value int) *int { return &value }

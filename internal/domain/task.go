@@ -38,8 +38,19 @@ type Task struct {
 	Status                  Status
 	Progress                *int
 	Version                 int64
+	HasChildren             bool
 	IncompleteDescendants   int
 	UnresolvedConfirmations int
+}
+
+// ForPersistence enforces the leaf_progress ownership boundary. Parent
+// progress is always derived from children and must never be written to the
+// leaf_progress column, even though transition code may carry a display value.
+func (t Task) ForPersistence() Task {
+	if t.HasChildren {
+		t.Progress = nil
+	}
+	return t
 }
 
 func (t Task) Transition(to Status) (Task, error) {
@@ -120,9 +131,9 @@ func RollbackCompletedAncestors(ancestors []Task) []Task {
 	result := append([]Task(nil), ancestors...)
 	for index := range result {
 		if result[index].Status == Completed {
-			progress := 95
 			result[index].Status = InProgress
-			result[index].Progress = &progress
+			result[index].HasChildren = true
+			result[index].Progress = nil
 		}
 	}
 	return result

@@ -29,6 +29,32 @@ func TestTransitionFSMAndCompletionInvariant(t *testing.T) {
 	}
 }
 
+func TestParentTransitionNeverPersistsDerivedProgress(t *testing.T) {
+	parent := Task{ID: "parent", Status: NotStarted, Progress: intPointer(75), HasChildren: true}
+	active, err := parent.Transition(InProgress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := active.ForPersistence()
+	if persisted.Status != InProgress || persisted.Progress != nil {
+		t.Fatalf("parent persistence must keep status and clear leaf progress: %+v", persisted)
+	}
+
+	done := Task{ID: "parent", Status: Completed, Progress: intPointer(100), HasChildren: true}
+	reopened, err := done.Transition(InProgress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted = reopened.ForPersistence(); persisted.Status != InProgress || persisted.Progress != nil {
+		t.Fatalf("reopened parent persisted derived progress: %+v", persisted)
+	}
+
+	leaf := Task{ID: "leaf", Status: InProgress, Progress: intPointer(40)}.ForPersistence()
+	if leaf.Progress == nil || *leaf.Progress != 40 {
+		t.Fatalf("leaf progress was cleared: %+v", leaf)
+	}
+}
+
 func intPointer(value int) *int { return &value }
 
 func TestParentProgressUsesEffectivePriorityWeights(t *testing.T) {
@@ -73,7 +99,7 @@ func TestRollbackPropagation(t *testing.T) {
 	}
 	rolledBack := RollbackCompletedAncestors(ancestors)
 	for _, task := range rolledBack {
-		if task.Status != InProgress || task.Progress == nil || *task.Progress != 95 {
+		if task.Status != InProgress || task.Progress != nil {
 			t.Fatalf("ancestor was not reopened: %+v", task)
 		}
 	}

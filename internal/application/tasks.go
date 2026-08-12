@@ -28,7 +28,7 @@ func (u Tasks) Transition(ctx context.Context, userID, taskID string, expected i
 	if err != nil {
 		return domain.Task{}, err
 	}
-	return u.Repo.UpdateStatus(ctx, next, expected, via)
+	return u.Repo.UpdateStatus(ctx, next.ForPersistence(), expected, via)
 }
 
 func (u Tasks) GoogleComplete(ctx context.Context, userID, taskID string, expected int64) (domain.Task, error) {

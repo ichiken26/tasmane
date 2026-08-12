@@ -98,3 +98,27 @@
 - TDD: frontend behavior/structure tests added first and observed failing before implementation; 11 tests green.
 - Verification gate now requires npm test/lint/typecheck/build and supports explicit `TASMANE_GO_BIN`; bootstrap uses `npm ci` and detects installed Go 1.22.12.
 - Critical-fetch/API-backed prefetch remains unchecked because backend list/dashboard endpoints are not implemented; UI uses deterministic demo data rather than inventing transport behavior.
+## 2026-08-13 — Phase 2 overdue/fire projection
+
+- Added a transport-independent deadline projection that derives `isOverdue` and propagates `showFire` from any incomplete overdue descendant to its unfinished ancestors.
+- Completed tasks and the exact deadline boundary do not show overdue/fire; malformed hierarchy snapshots (empty/duplicate IDs, missing parents, cycles) fail closed.
+- Added focused domain tests, including propagation through a completed intermediary without displaying fire on that completed task.
+- Verification: `go test ./internal/domain`.
+## 2026-08-13 — Phase 2 date propagation impact calculator
+
+- Added a transport-independent, deterministic date impact calculator for ancestor expansion and descendant contraction across both start and end boundaries.
+- Plans include before/after values for every mutation, validate all date ranges and hierarchy references, and reject cycles instead of emitting partial effects.
+- Added focused tests for child expansion, parent contraction across multiple levels, deterministic no-op filtering, and invalid input.
+- Verification: `go test ./internal/domain`.
+## 2026-08-13 — Phase 2 parent persistence boundary
+
+- Added explicit parent metadata and a domain persistence projection that always clears `leaf_progress` for tasks with children while retaining parent status.
+- Application status transitions now normalize at the repository boundary; completed-ancestor rollback persists `IN_PROGRESS` with NULL leaf progress rather than the derived display value 95.
+- Added domain and application tests proving parent values are cleared and leaf values are preserved.
+- Verification: `go test ./internal/domain ./internal/application`.
+## 2026-08-13 — Phase 2 resolved decision policies
+
+- Added tested domain plans for OD-001 genre subtree movement/boundary dependency removal, OD-002 Google due hierarchy conflict, OD-003 dedicated Google Task List create/reuse, OD-006 first-child confirmation/progress clearing, and OD-007 recursive deduplicated deletion impact.
+- OD-005 remains enforced by the isolated scoring constants and exact-weight tests; OD-008 remains enforced by internal Binding authentication and contract tests.
+- The new plans are transport-independent so later HTTP, Google queue, and MCP adapters must consume the same decisions.
+- Verification: `go test ./internal/domain`.
