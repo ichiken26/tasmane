@@ -293,20 +293,20 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 		t.Fatalf("delete used task type: %v", err)
 	}
 	relations := application.Relations{Repo: repository}
-	if err := relations.AddDependency(context.Background(), userID, parentID, childID); err != nil {
+	if err := relations.AddDependency(context.Background(), userID, parentID, childID, 2); err != nil {
 		t.Fatalf("add dependency: %v", err)
 	}
 	dependencies, err := repository.ListTaskDependencies(context.Background(), userID, parentID)
 	if err != nil || len(dependencies) != 1 || dependencies[0].DependsOnTaskID != childID {
 		t.Fatalf("list dependencies: %+v %v", dependencies, err)
 	}
-	if err := relations.AddDependency(context.Background(), userID, childID, parentID); !errors.Is(err, domain.ErrDependencyCycle) {
+	if err := relations.AddDependency(context.Background(), userID, childID, parentID, 1); !errors.Is(err, domain.ErrDependencyCycle) {
 		t.Fatalf("dependency cycle accepted: %v", err)
 	}
 	if err := relations.AssignParent(context.Background(), userID, parentID, childID); !errors.Is(err, domain.ErrHierarchyCycle) {
 		t.Fatalf("hierarchy cycle accepted: %v", err)
 	}
-	if err := relations.AddDependency(context.Background(), otherUserID, parentID, childID); !errors.Is(err, domain.ErrGraphTaskNotFound) {
+	if err := relations.AddDependency(context.Background(), otherUserID, parentID, childID, 1); !errors.Is(err, domain.ErrGraphTaskNotFound) {
 		t.Fatalf("cross-user graph access: %v", err)
 	}
 }

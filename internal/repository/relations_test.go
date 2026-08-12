@@ -39,10 +39,13 @@ func TestPostgresAddDependencyRevalidatesAndPersistsInsideLock(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs("user-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	expectGraphRows(mock, []driver.Value{"a", "user-1", "genre-1", ""}, []driver.Value{"b", "user-1", "genre-1", ""}, nil)
+	mock.ExpectQuery("SELECT version FROM tasks").WithArgs("a", "user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 	mock.ExpectExec("INSERT INTO task_dependencies").
 		WithArgs("user-1", "genre-1", "a", "b").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE tasks SET version").WithArgs("a", "user-1", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := repository.AddDependency(context.Background(), "user-1", domain.Dependency{TaskID: "a", DependsOnTaskID: "b"}); err != nil {
+	if err := repository.AddDependency(context.Background(), "user-1", domain.Dependency{TaskID: "a", DependsOnTaskID: "b"}, 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

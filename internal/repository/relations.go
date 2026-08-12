@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"tasmane/internal/domain"
@@ -109,8 +110,8 @@ func (p *Postgres) SetParent(ctx context.Context, userID, taskID, parentID strin
 	return nil
 }
 
-func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency domain.Dependency) error {
-	if p == nil || p.database == nil || userID == "" {
+func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency domain.Dependency, expectedVersion int64) error {
+	if p == nil || p.database == nil || userID == "" || expectedVersion < 1 {
 		return domain.ErrForbidden
 	}
 	tx, err := p.database.BeginTx(ctx, nil)
@@ -127,6 +128,16 @@ func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency 
 	}
 	if err := domain.ValidateDependencyAddition(tasks, dependencies, dependency.TaskID, dependency.DependsOnTaskID); err != nil {
 		return err
+	}
+	var currentVersion int64
+	if err := tx.QueryRowContext(ctx, `SELECT version FROM tasks
+    WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE`, dependency.TaskID, userID).Scan(&currentVersion); errors.Is(err, sql.ErrNoRows) {
+		return domain.ErrForbidden
+	} else if err != nil {
+		return fmt.Errorf("lock dependency task version: %w", err)
+	}
+	if currentVersion != expectedVersion {
+		return domain.ErrVersionConflict
 	}
 	var genreID string
 	for _, task := range tasks {
@@ -148,6 +159,10 @@ func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency 
 	}
 	if count != 1 {
 		return domain.ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET version=version+1
+    WHERE id=$1 AND user_id=$2 AND version=$3 AND deleted_at IS NULL`, dependency.TaskID, userID, expectedVersion); err != nil {
+		return fmt.Errorf("increment dependency task version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit dependency addition: %w", err)

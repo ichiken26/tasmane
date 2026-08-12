@@ -17,11 +17,14 @@ type relationRepoStub struct {
 func (r *relationRepoStub) LoadGraph(context.Context, string) ([]domain.GraphTask, []domain.Dependency, error) {
 	return r.tasks, r.edges, nil
 }
+func (r *relationRepoStub) ListTaskDependencies(context.Context, string, string) ([]domain.Dependency, error) {
+	return r.edges, nil
+}
 func (r *relationRepoStub) SetParent(context.Context, string, string, string) error {
 	r.writes++
 	return nil
 }
-func (r *relationRepoStub) AddDependency(context.Context, string, domain.Dependency) error {
+func (r *relationRepoStub) AddDependency(context.Context, string, domain.Dependency, int64) error {
 	r.writes++
 	return nil
 }
@@ -36,7 +39,7 @@ func TestRelationsValidateBeforePersistence(t *testing.T) {
 	if err := u.AssignParent(context.Background(), "u", "b", "a"); !errors.Is(err, domain.ErrHierarchyCycle) {
 		t.Fatal(err)
 	}
-	if err := u.AddDependency(context.Background(), "u", "b", "a"); !errors.Is(err, domain.ErrDependencyCycle) {
+	if err := u.AddDependency(context.Background(), "u", "b", "a", 1); !errors.Is(err, domain.ErrDependencyCycle) {
 		t.Fatal(err)
 	}
 	if r.writes != 0 {
@@ -45,7 +48,7 @@ func TestRelationsValidateBeforePersistence(t *testing.T) {
 	if err := u.AssignParent(context.Background(), "u", "a", "b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := u.AddDependency(context.Background(), "u", "a", "b"); err != nil {
+	if err := u.AddDependency(context.Background(), "u", "a", "b", 1); err != nil {
 		t.Fatal(err)
 	}
 	if r.writes != 2 {
@@ -62,7 +65,7 @@ func TestRelationsRejectRepositoryGraphOutsideAuthenticatedOwner(t *testing.T) {
 	if err := u.AssignParent(context.Background(), "authenticated", "a", "b"); !errors.Is(err, domain.ErrGraphOwnership) {
 		t.Fatalf("AssignParent error = %v", err)
 	}
-	if err := u.AddDependency(context.Background(), "authenticated", "a", "b"); !errors.Is(err, domain.ErrGraphOwnership) {
+	if err := u.AddDependency(context.Background(), "authenticated", "a", "b", 1); !errors.Is(err, domain.ErrGraphOwnership) {
 		t.Fatalf("AddDependency error = %v", err)
 	}
 	if r.writes != 0 {
@@ -75,8 +78,15 @@ type confirmationRepoStub struct {
 	writes int
 }
 
+func (r *confirmationRepoStub) CreateConfirmation(context.Context, string, string, string, string, *time.Time) (domain.Confirmation, error) {
+	return r.value, nil
+}
+
 func (r *confirmationRepoStub) GetConfirmation(context.Context, string, string) (domain.Confirmation, error) {
 	return r.value, nil
+}
+func (r *confirmationRepoStub) ListConfirmations(context.Context, string, string) ([]domain.Confirmation, error) {
+	return []domain.Confirmation{r.value}, nil
 }
 func (r *confirmationRepoStub) UpdateConfirmation(_ context.Context, _, _ string, value domain.Confirmation) error {
 	r.value = value
