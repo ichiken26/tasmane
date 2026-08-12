@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tasmane.kokage-studio.com/schema/google-sync-message.json",
+  "title": "GoogleTaskSyncMessage",
+  "type": "object",
+  "required": [
+    "jobId",
+    "userId",
+    "reason",
+    "enqueuedAt"
+  ],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "userId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "taskId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "TASK_CHANGED",
+        "MANUAL_RETRY",
+        "ACCESS_SYNC",
+        "RESTORE",
+        "DELETE"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "enqueuedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

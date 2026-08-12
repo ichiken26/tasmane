@@ -1,0 +1,188 @@
+{
+  "version": "0.1.0",
+  "policy": {
+    "delete_tools_exposed": false,
+    "domain_rules_must_be_shared": true
+  },
+  "tools": [
+    {
+      "name": "get_task",
+      "action": "read",
+      "input": {
+        "taskId": "uuid"
+      }
+    },
+    {
+      "name": "search_tasks",
+      "action": "read",
+      "input": {
+        "q": "string?",
+        "genreIds": "uuid[]?",
+        "priority": "LOW|MEDIUM|HIGH?",
+        "deadline": "string?"
+      }
+    },
+    {
+      "name": "get_task_tree",
+      "action": "read",
+      "input": {
+        "taskId": "uuid"
+      }
+    },
+    {
+      "name": "get_task_dependencies",
+      "action": "read",
+      "input": {
+        "taskId": "uuid"
+      }
+    },
+    {
+      "name": "create_task",
+      "action": "create",
+      "inputRef": "#/openapi/components/schemas/CreateTaskRequest"
+    },
+    {
+      "name": "update_task",
+      "action": "update",
+      "input": {
+        "taskId": "uuid",
+        "expectedVersion": "int",
+        "patch": "object",
+        "impactToken": "string?"
+      }
+    },
+    {
+      "name": "transition_task",
+      "action": "status_change",
+      "input": {
+        "taskId": "uuid",
+        "toStatus": "NOT_STARTED|IN_PROGRESS|COMPLETED",
+        "expectedVersion": "int",
+        "impactToken": "string?"
+      }
+    },
+    {
+      "name": "create_confirmation",
+      "action": "create",
+      "input": {
+        "taskId": "uuid",
+        "content": "string",
+        "targetName": "string",
+        "dueAt": "datetime?"
+      }
+    },
+    {
+      "name": "update_confirmation",
+      "action": "update",
+      "input": {
+        "confirmationId": "uuid",
+        "status": "UNCONFIRMED|CHECKING|CONFIRMED?"
+      }
+    },
+    {
+      "name": "list_confirmations",
+      "action": "read",
+      "input": {
+        "taskId": "uuid"
+      }
+    },
+    {
+      "name": "add_dependency",
+      "action": "update",
+      "input": {
+        "taskId": "uuid",
+        "dependsOnTaskId": "uuid",
+        "expectedVersion": "int"
+      }
+    },
+    {
+      "name": "list_genres",
+      "action": "read",
+      "input": {}
+    },
+    {
+      "name": "get_genre",
+      "action": "read",
+      "input": {
+        "genreId": "uuid"
+      }
+    },
+    {
+      "name": "create_genre",
+      "action": "create",
+      "input": {
+        "name": "string"
+      }
+    },
+    {
+      "name": "update_genre",
+      "action": "update",
+      "input": {
+        "genreId": "uuid",
+        "name": "string"
+      }
+    },
+    {
+      "name": "list_task_types",
+      "action": "read",
+      "input": {}
+    },
+    {
+      "name": "create_task_type",
+      "action": "create",
+      "input": {
+        "name": "string"
+      }
+    },
+    {
+      "name": "update_task_type",
+      "action": "update",
+      "input": {
+        "taskTypeId": "uuid",
+        "name": "string"
+      }
+    },
+    {
+      "name": "list_genre_task_types",
+      "action": "read",
+      "input": {
+        "genreId": "uuid"
+      }
+    },
+    {
+      "name": "attach_genre_task_type",
+      "action": "update",
+      "input": {
+        "genreId": "uuid",
+        "taskTypeId": "uuid"
+      }
+    },
+    {
+      "name": "get_dashboard",
+      "action": "read",
+      "input": {}
+    },
+    {
+      "name": "get_genre_dashboard",
+      "action": "read",
+      "input": {
+        "genreId": "uuid"
+      }
+    },
+    {
+      "name": "trigger_google_sync",
+      "action": "update",
+      "input": {}
+    },
+    {
+      "name": "list_google_conflicts",
+      "action": "read",
+      "input": {}
+    },
+    {
+      "name": "list_google_import_candidates",
+      "action": "read",
+      "input": {}
+    }
+  ]
+}

@@ -1,0 +1,689 @@
+openapi: 3.1.0
+info:
+  title: Tasmane API
+  version: 0.2.0
+servers:
+- url: https://tasmane.kokage-studio.com/api
+security:
+- InternalBindingAuth: []
+  WorkerUserContext: []
+paths:
+  /v1/tasks:
+    get:
+      operationId: searchTasks
+      parameters:
+      - in: query
+        name: q
+        schema:
+          type: string
+      - in: query
+        name: genreIds
+        schema:
+          type: array
+          items:
+            type: string
+            format: uuid
+        style: form
+        explode: false
+      - in: query
+        name: priority
+        schema:
+          $ref: '#/components/schemas/Priority'
+      - in: query
+        name: deadline
+        schema:
+          type: string
+          enum:
+          - today
+          - tomorrow
+          - week
+          - month
+          - later
+          - overdue
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - taskScore
+          - priority
+          - deadline
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+    post:
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '409':
+          description: Confirmation required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImpactPlan'
+  /v1/tasks/{taskId}:
+    get:
+      operationId: getTask
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+    patch:
+      operationId: updateTask
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTaskRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '409':
+          description: Version/domain/impact conflict
+    delete:
+      operationId: deleteTask
+      description: Human Web UI/API only. Never expose as MCP/WebMCP tool.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      - in: query
+        name: expectedVersion
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: impactToken
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Soft deleted
+        '409':
+          description: Confirmation required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImpactPlan'
+  /v1/tasks/{taskId}/transition:
+    post:
+      operationId: transitionTask
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - toStatus
+              - expectedVersion
+              properties:
+                toStatus:
+                  $ref: '#/components/schemas/TaskStatus'
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                impactToken:
+                  type:
+                  - string
+                  - 'null'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '409':
+          description: Conflict/confirmation required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImpactPlan'
+        '422':
+          description: Invalid transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/tasks/{taskId}/tree:
+    get:
+      operationId: getTaskTree
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Hierarchy projection
+  /v1/tasks/{taskId}/dependencies:
+    get:
+      operationId: listTaskDependencies
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Dependency graph edges
+    post:
+      operationId: addTaskDependency
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - dependsOnTaskId
+              - expectedVersion
+              properties:
+                dependsOnTaskId:
+                  type: string
+                  format: uuid
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+      responses:
+        '201':
+          description: Added
+        '409':
+          description: Cycle/genre conflict
+  /v1/tasks/{taskId}/confirmations:
+    get:
+      operationId: listConfirmations
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: OK
+    post:
+      operationId: createConfirmation
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '201':
+          description: Created
+  /v1/confirmations/{confirmationId}:
+    patch:
+      operationId: updateConfirmation
+      parameters:
+      - $ref: '#/components/parameters/ConfirmationId'
+      responses:
+        '200':
+          description: Updated
+  /v1/genres:
+    get:
+      operationId: listGenres
+      responses:
+        '200':
+          description: OK
+    post:
+      operationId: createGenre
+      responses:
+        '201':
+          description: Created
+  /v1/genres/{genreId}:
+    get:
+      operationId: getGenre
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Genre'
+    patch:
+      operationId: updateGenre
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      responses:
+        '200':
+          description: Updated
+    delete:
+      operationId: deleteGenre
+      description: Human only; blocked while tasks exist.
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      responses:
+        '204':
+          description: Deleted
+        '409':
+          description: Genre in use
+  /v1/genres/{genreId}/task-types:
+    get:
+      operationId: listGenreTaskTypes
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      responses:
+        '200':
+          description: OK
+    post:
+      operationId: attachGenreTaskType
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      responses:
+        '204':
+          description: Attached
+  /v1/task-types:
+    get:
+      operationId: listTaskTypes
+      responses:
+        '200':
+          description: OK
+    post:
+      operationId: createTaskType
+      responses:
+        '201':
+          description: Created
+  /v1/task-types/{taskTypeId}:
+    get:
+      operationId: getTaskType
+      parameters:
+      - $ref: '#/components/parameters/TaskTypeId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskType'
+    patch:
+      operationId: updateTaskType
+      parameters:
+      - $ref: '#/components/parameters/TaskTypeId'
+      responses:
+        '200':
+          description: Updated
+    delete:
+      operationId: deleteTaskType
+      description: Human only; blocked while in use.
+      parameters:
+      - $ref: '#/components/parameters/TaskTypeId'
+      responses:
+        '204':
+          description: Deleted
+        '409':
+          description: In use
+  /v1/dashboard:
+    get:
+      operationId: getDashboard
+      responses:
+        '200':
+          description: Dashboard projection
+  /v1/dashboard/genres/{genreId}:
+    get:
+      operationId: getGenreDashboard
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      responses:
+        '200':
+          description: Genre dashboard projection
+  /v1/google/sync:
+    post:
+      operationId: triggerGoogleSync
+      responses:
+        '202':
+          description: Queued
+        '409':
+          description: Already syncing
+  /v1/google/conflicts:
+    get:
+      operationId: listGoogleConflicts
+      responses:
+        '200':
+          description: Conflicts
+  /v1/google/import-candidates:
+    get:
+      operationId: listGoogleImportCandidates
+      responses:
+        '200':
+          description: Candidates
+components:
+  securitySchemes:
+    InternalBindingAuth:
+      type: apiKey
+      in: header
+      name: X-Tasmane-Internal-Binding
+      description: Secret injected only by the Cloudflare Worker Binding.
+    WorkerUserContext:
+      type: apiKey
+      in: header
+      name: X-Tasmane-Authenticated-User
+      description: Authenticated identity injected by the trusted Worker; public clients cannot set it.
+  parameters:
+    TaskId:
+      in: path
+      name: taskId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GenreId:
+      in: path
+      name: genreId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskTypeId:
+      in: path
+      name: taskTypeId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ConfirmationId:
+      in: path
+      name: confirmationId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    TaskStatus:
+      type: string
+      enum:
+      - NOT_STARTED
+      - IN_PROGRESS
+      - COMPLETED
+    Priority:
+      type: string
+      enum:
+      - LOW
+      - MEDIUM
+      - HIGH
+    ConfirmationStatus:
+      type: string
+      enum:
+      - UNCONFIRMED
+      - CHECKING
+      - CONFIRMED
+    ImpactEntity:
+      type: object
+      required:
+      - id
+      - type
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        title:
+          type:
+          - string
+          - 'null'
+        reason:
+          type:
+          - string
+          - 'null'
+    ImpactPlan:
+      type: object
+      required:
+      - code
+      - impactToken
+      - affectedEntities
+      - warnings
+      properties:
+        code:
+          type: string
+          const: IMPACT_CONFIRMATION_REQUIRED
+        impactToken:
+          type: string
+        affectedEntities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImpactEntity'
+        warnings:
+          type: array
+          items:
+            type: string
+    Task:
+      type: object
+      required:
+      - id
+      - genreId
+      - title
+      - status
+      - version
+      properties:
+        id:
+          type: string
+          format: uuid
+        genreId:
+          type: string
+          format: uuid
+        taskTypeId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        parentTaskId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        title:
+          type: string
+        body:
+          type:
+          - string
+          - 'null'
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        progress:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+          maximum: 100
+        startAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        endAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        isAllDay:
+          type: boolean
+        manualPriority:
+          anyOf:
+          - $ref: '#/components/schemas/Priority'
+          - type: 'null'
+        effectivePriority:
+          $ref: '#/components/schemas/Priority'
+        isOverdue:
+          type: boolean
+        showFire:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+    CreateTaskRequest:
+      type: object
+      required:
+      - title
+      - genreId
+      properties:
+        title:
+          type: string
+          minLength: 1
+        body:
+          type:
+          - string
+          - 'null'
+        genreId:
+          type: string
+          format: uuid
+        taskTypeId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        parentTaskId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        startAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        endAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        isAllDay:
+          type: boolean
+          default: true
+        manualPriority:
+          anyOf:
+          - $ref: '#/components/schemas/Priority'
+          - type: 'null'
+        impactToken:
+          type:
+          - string
+          - 'null'
+    PatchTaskRequest:
+      type: object
+      required:
+      - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+        body:
+          type:
+          - string
+          - 'null'
+        genreId:
+          type: string
+          format: uuid
+        taskTypeId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        parentTaskId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        startAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        endAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        isAllDay:
+          type: boolean
+        manualPriority:
+          anyOf:
+          - $ref: '#/components/schemas/Priority'
+          - type: 'null'
+        impactToken:
+          type:
+          - string
+          - 'null'
+    Genre:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    TaskType:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    Confirmation:
+      type: object
+      required:
+      - id
+      - taskId
+      - content
+      - targetName
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        content:
+          type: string
+        targetName:
+          type: string
+        status:
+          $ref: '#/components/schemas/ConfirmationStatus'
+        dueAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details: {}

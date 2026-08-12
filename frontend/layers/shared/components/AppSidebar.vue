@@ -1,0 +1,1 @@
+<template><aside class="sidebar" aria-label="サイドバー"><NuxtLink to="/dashboard">Dashboard</NuxtLink><strong>Genres</strong><NuxtLink to="/dashboard/genres/development">開発</NuxtLink><NuxtLink to="/dashboard/genres/operations">運用</NuxtLink></aside></template>

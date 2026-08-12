@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tasmane.kokage-studio.com/schema/broadcast-message.json",
+  "title": "TasmaneBroadcastMessage",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "entity",
+        "sentAt"
+      ],
+      "properties": {
+        "type": {
+          "const": "ENTITY_SNAPSHOT"
+        },
+        "entity": {
+          "type": "object",
+          "required": [
+            "kind",
+            "id",
+            "version",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "task",
+                "genre",
+                "taskType",
+                "confirmation"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "entityKind",
+        "entityId",
+        "version",
+        "sentAt"
+      ],
+      "properties": {
+        "type": {
+          "const": "ENTITY_INVALIDATED"
+        },
+        "entityKind": {
+          "type": "string",
+          "enum": [
+            "task",
+            "genre",
+            "taskType",
+            "confirmation"
+          ]
+        },
+        "entityId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
