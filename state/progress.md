@@ -186,3 +186,10 @@
 - Task detail renders the Task before concurrently prefetching its hierarchy and dependencies; loading/error states use accessible live roles.
 - Search retains URL/bookmark/back-forward state while discarding stale out-of-order responses; Genre filters come from the API.
 - Warp-inspired layout/styles were preserved. Frontend 22 tests, lint, strict typecheck, and production build pass.
+## 2026-08-13 — Phase 8 Gemini advice lifecycle
+
+- Added a timeout-capable Gemini `generateContent` REST provider using the official API endpoint shape and `x-goog-api-key`; provider tests verify authentication and text extraction.
+- Added a minute-tick scheduler that evaluates each user's timezone and generates exactly once after local 04:00 for both the whole dashboard and every Genre.
+- Canonical JSON source hashing reuses unexpired advice for identical inputs; a unique database index prevents concurrent duplicates.
+- Advice expires exactly 30 days after generation and scheduler cleanup deletes expired rows through the repository boundary.
+- Additive migration 0006 and the six-migration fresh PostgreSQL suite pass.

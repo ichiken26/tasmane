@@ -94,12 +94,12 @@
 - [x] BroadcastChannel JSON schema conformance
 
 ## Phase 8 AI
-- [ ] Gemini provider
-- [ ] 04:00 timezone scheduler
-- [ ] whole-dashboard advice
-- [ ] genre advice
-- [ ] source hash
-- [ ] 30-day retention
+- [x] Gemini provider
+- [x] 04:00 timezone scheduler
+- [x] whole-dashboard advice
+- [x] genre advice
+- [x] source hash
+- [x] 30-day retention
 
 ## Phase 9 Release gates
 - [ ] all P0/P1 tests pass
