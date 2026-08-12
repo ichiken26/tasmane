@@ -129,3 +129,21 @@
 - Added a live fresh-schema repository test covering cross-user hiding, recursive state, parent transition persistence, version increment, and history creation.
 - Hardened the ephemeral PostgreSQL harness by installing required extensions once in `public`, retaining isolated application schemas and deterministic sequential package execution.
 - Verification: repository unit tests and `scripts/test-postgres.sh`.
+## 2026-08-13 — Phase 3 Genre and TaskType repositories
+
+- Added tenant-scoped PostgreSQL CRUD repositories for Genre and TaskType with trimmed required names, deterministic active lists, soft-delete hiding, and unique violations mapped to domain conflict.
+- Genre deletion locks the resource and rejects active Tasks; TaskType detachment/deletion locks relations/resources and rejects active Task use.
+- Genre/TaskType attachment verifies both active resources belong to the same authenticated user and is idempotent without allowing a cross-user no-op.
+- Live fresh-schema tests cover normalized-name uniqueness, list/delete visibility, relation attachment, cross-user rejection, and in-use protections.
+## 2026-08-13 — Phase 3 Confirmation repository
+
+- Expanded Confirmation entities with persistence identity/content/due metadata while preserving the existing FSM and scoring behavior.
+- Added active-Task/tenant-scoped create, get, and deterministic list operations; creation trims required fields and cannot attach to a foreign or deleted Task.
+- FSM transitions carry their expected prior status into an atomic conditional update, converting concurrent transitions into `ErrVersionConflict` rather than silently overwriting state.
+- Unit and live fresh-schema tests cover creation shape, shared Application transition, listing, and stale transition rejection.
+## 2026-08-13 — Phase 3 Dependency repository
+
+- Added active, tenant-scoped hierarchy/dependency graph loading and deterministic per-Task dependency listing.
+- Parent and dependency writes acquire a per-user PostgreSQL advisory transaction lock, reload the graph inside the lock, and call the shared Domain cycle/ownership/Genre validators immediately before persistence.
+- Duplicate dependency insertion is a domain conflict; missing/cross-user rows remain hidden; removal is owner-scoped.
+- Unit tests prove repository-level revalidation and rollback, while live tests cover shared Application writes, persisted listing, cycle rejection, and cross-user isolation.

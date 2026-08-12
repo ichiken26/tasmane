@@ -31,10 +31,10 @@
 
 ## Phase 3 Repository / UseCases
 - [x] Task repository
-- [ ] Genre repository
-- [ ] TaskType repository
-- [ ] Confirmation repository
-- [ ] Dependency repository
+- [x] Genre repository
+- [x] TaskType repository
+- [x] Confirmation repository
+- [x] Dependency repository
 - [x] history write atomicity
 - [x] optimistic lock
 

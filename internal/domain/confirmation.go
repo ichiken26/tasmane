@@ -20,8 +20,15 @@ var (
 )
 
 type Confirmation struct {
-	Status      ConfirmationStatus
-	ConfirmedAt *time.Time
+	ID             string
+	UserID         string
+	TaskID         string
+	Content        string
+	TargetName     string
+	Status         ConfirmationStatus
+	ExpectedStatus ConfirmationStatus
+	DueAt          *time.Time
+	ConfirmedAt    *time.Time
 }
 
 func (c Confirmation) Transition(to ConfirmationStatus, at time.Time) (Confirmation, error) {
@@ -34,6 +41,7 @@ func (c Confirmation) Transition(to ConfirmationStatus, at time.Time) (Confirmat
 	if to == ConfirmationConfirmed && at.IsZero() {
 		return Confirmation{}, ErrInvalidConfirmationInput
 	}
+	c.ExpectedStatus = c.Status
 	c.Status = to
 	if to == ConfirmationConfirmed {
 		value := at
