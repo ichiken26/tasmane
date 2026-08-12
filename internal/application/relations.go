@@ -24,6 +24,9 @@ func (u Relations) AssignParent(ctx context.Context, userID, taskID, parentID st
 	if err != nil {
 		return err
 	}
+	if err := validateGraphOwner(tasks, userID); err != nil {
+		return err
+	}
 	if err := domain.ValidateHierarchyAssignment(tasks, taskID, parentID); err != nil {
 		return err
 	}
@@ -38,10 +41,22 @@ func (u Relations) AddDependency(ctx context.Context, userID, taskID, dependsOnT
 	if err != nil {
 		return err
 	}
+	if err := validateGraphOwner(tasks, userID); err != nil {
+		return err
+	}
 	if err := domain.ValidateDependencyAddition(tasks, dependencies, taskID, dependsOnTaskID); err != nil {
 		return err
 	}
 	return u.Repo.AddDependency(ctx, userID, domain.Dependency{TaskID: taskID, DependsOnTaskID: dependsOnTaskID})
+}
+
+func validateGraphOwner(tasks []domain.GraphTask, userID string) error {
+	for _, task := range tasks {
+		if task.UserID != userID {
+			return domain.ErrGraphOwnership
+		}
+	}
+	return nil
 }
 
 type ConfirmationRepository interface {

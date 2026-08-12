@@ -30,7 +30,6 @@ func TestRelationsValidateBeforePersistence(t *testing.T) {
 	tasks := []domain.GraphTask{
 		{ID: "a", UserID: "u", GenreID: "g", ParentID: "b"},
 		{ID: "b", UserID: "u", GenreID: "g"},
-		{ID: "other", UserID: "other", GenreID: "g"},
 	}
 	r := &relationRepoStub{tasks: tasks, edges: []domain.Dependency{{TaskID: "a", DependsOnTaskID: "b"}}}
 	u := Relations{Repo: r}
@@ -38,9 +37,6 @@ func TestRelationsValidateBeforePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := u.AddDependency(context.Background(), "u", "b", "a"); !errors.Is(err, domain.ErrDependencyCycle) {
-		t.Fatal(err)
-	}
-	if err := u.AssignParent(context.Background(), "u", "a", "other"); !errors.Is(err, domain.ErrGraphOwnership) {
 		t.Fatal(err)
 	}
 	if r.writes != 0 {
@@ -54,6 +50,23 @@ func TestRelationsValidateBeforePersistence(t *testing.T) {
 	}
 	if r.writes != 2 {
 		t.Fatalf("valid writes=%d", r.writes)
+	}
+}
+
+func TestRelationsRejectRepositoryGraphOutsideAuthenticatedOwner(t *testing.T) {
+	r := &relationRepoStub{tasks: []domain.GraphTask{
+		{ID: "a", UserID: "other", GenreID: "g"},
+		{ID: "b", UserID: "other", GenreID: "g"},
+	}}
+	u := Relations{Repo: r}
+	if err := u.AssignParent(context.Background(), "authenticated", "a", "b"); !errors.Is(err, domain.ErrGraphOwnership) {
+		t.Fatalf("AssignParent error = %v", err)
+	}
+	if err := u.AddDependency(context.Background(), "authenticated", "a", "b"); !errors.Is(err, domain.ErrGraphOwnership) {
+		t.Fatalf("AddDependency error = %v", err)
+	}
+	if r.writes != 0 {
+		t.Fatalf("foreign graph writes = %d", r.writes)
 	}
 }
 

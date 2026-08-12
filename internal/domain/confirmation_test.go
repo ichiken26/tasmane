@@ -36,6 +36,30 @@ func TestConfirmationFSMRejectsZeroConfirmedAt(t *testing.T) {
 	}
 }
 
+func TestConfirmationFSMTransitionTable(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	statuses := []ConfirmationStatus{ConfirmationUnconfirmed, ConfirmationChecking, ConfirmationConfirmed}
+	allowed := map[[2]ConfirmationStatus]bool{
+		{ConfirmationUnconfirmed, ConfirmationChecking}: true,
+		{ConfirmationChecking, ConfirmationUnconfirmed}: true,
+		{ConfirmationChecking, ConfirmationConfirmed}:   true,
+		{ConfirmationConfirmed, ConfirmationChecking}:   true,
+	}
+	for _, from := range statuses {
+		for _, to := range statuses {
+			t.Run(string(from)+"_to_"+string(to), func(t *testing.T) {
+				_, err := (Confirmation{Status: from}).Transition(to, now)
+				if allowed[[2]ConfirmationStatus{from, to}] && err != nil {
+					t.Fatalf("allowed transition rejected: %v", err)
+				}
+				if !allowed[[2]ConfirmationStatus{from, to}] && !errors.Is(err, ErrInvalidConfirmationTransition) {
+					t.Fatalf("forbidden transition error = %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestConfirmationScoreBoundariesAndStatus(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	unconfirmed, ok, err := CalculateConfirmationScore(ConfirmationScoreInput{Status: ConfirmationUnconfirmed, ParentTaskScore: 50, Now: now})

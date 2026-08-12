@@ -79,6 +79,7 @@ func TestDependencyValidationRejectsMalformedExistingEdges(t *testing.T) {
 	tasks := []GraphTask{
 		{ID: "a", UserID: "u1", GenreID: "g1"},
 		{ID: "b", UserID: "u1", GenreID: "g1"},
+		{ID: "c", UserID: "u1", GenreID: "g1"},
 		{ID: "foreign", UserID: "u2", GenreID: "g1"},
 	}
 	cases := []struct {
@@ -89,6 +90,8 @@ func TestDependencyValidationRejectsMalformedExistingEdges(t *testing.T) {
 		{"empty endpoint", []Dependency{{TaskID: "", DependsOnTaskID: "b"}}, ErrInvalidGraphInput},
 		{"missing endpoint", []Dependency{{TaskID: "a", DependsOnTaskID: "missing"}}, ErrGraphTaskNotFound},
 		{"cross-user existing edge", []Dependency{{TaskID: "a", DependsOnTaskID: "foreign"}}, ErrGraphOwnership},
+		{"existing remote self cycle", []Dependency{{TaskID: "c", DependsOnTaskID: "c"}}, ErrDependencyCycle},
+		{"existing remote cycle", []Dependency{{TaskID: "b", DependsOnTaskID: "c"}, {TaskID: "c", DependsOnTaskID: "b"}}, ErrDependencyCycle},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

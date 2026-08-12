@@ -170,6 +170,27 @@ func TestTaskScoreCheckingPenaltyIsRelaxedWhenOverdue(t *testing.T) {
 	}
 }
 
+func TestTaskScoreWeightComposition(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	neutral, err := CalculateTaskScore(TaskScoreInput{
+		ID: "neutral", Status: InProgress, EffectivePriority: MediumPriority,
+		CreatedAt: now, Now: now,
+	})
+	if err != nil || neutral.Score != 48 {
+		t.Fatalf("neutral score = %d, err = %v", neutral.Score, err)
+	}
+
+	due := now.Add(24 * time.Hour)
+	maxComponents, err := CalculateTaskScore(TaskScoreInput{
+		ID: "max-components", Status: InProgress, EffectivePriority: HighPriority,
+		Deadline: &due, Progress: intPointer(0), CreatedAt: now.Add(-30 * 24 * time.Hour),
+		Now: now, DirectDependents: 4,
+	})
+	if err != nil || maxComponents.Score != 98 {
+		t.Fatalf("weighted score = %d, err = %v", maxComponents.Score, err)
+	}
+}
+
 func containsReason(reasons []string, target string) bool {
 	for _, reason := range reasons {
 		if reason == target {

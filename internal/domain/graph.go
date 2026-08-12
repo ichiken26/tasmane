@@ -121,8 +121,10 @@ func ValidateDependencyAddition(tasks []GraphTask, dependencies []Dependency, ta
 		visiting[id], visited[id] = false, true
 		return false
 	}
-	if hasCycle(taskID) {
-		return ErrDependencyCycle
+	for id := range byID {
+		if hasCycle(id) {
+			return ErrDependencyCycle
+		}
 	}
 	return nil
 }

@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-08-13 — Phase 2 graph and scoring defense-in-depth
+
+- Relation use cases reject any loaded graph task whose owner differs from the authenticated user, preventing a faulty repository adapter from bypassing tenant isolation.
+- Dependency validation now rejects cycles anywhere in the supplied active graph, including an existing cycle that is not reachable from the proposed edge.
+- Confirmation tests fix all nine status transition pairs as an explicit adjacent-only FSM table.
+- TaskScore tests fix the documented 30/25/20/15/5/5 composition with exact neutral and maximum-component results.
+- Red reproduced foreign-graph persistence and remote-cycle acceptance; Green confirmed the shared Domain/Application fixes.
+- Verification: Go format, vet, unit tests, race tests, and build; Nuxt 21 tests, lint, typecheck, and production build; ephemeral PostgreSQL integration; full `scripts/verify.sh`; `git diff --check` — all passed.
+
 ## 2026-08-13 — repair round 4 (scoring and Confirmation invariant hardening)
 
 - Red: domain regression tests reproduced acceptance of zero scoring times, empty Task IDs, unknown Task status, and zero `confirmed_at`; boundary tests exercised platform maximum dependency counts.
