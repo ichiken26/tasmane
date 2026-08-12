@@ -89,7 +89,7 @@
 - [x] page titles / Nuxt SEO meta
 - [x] Nuxt Layers boundaries
 - [x] date propagation warning modal
-- [ ] critical fetch -> render -> prefetch
+- [x] critical fetch -> render -> prefetch
 - [x] BroadcastChannel version handling
 - [x] BroadcastChannel JSON schema conformance
 

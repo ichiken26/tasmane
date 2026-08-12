@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { schedulePrefetch } from '../layers/core/composables/criticalOrder'
 import { acceptSnapshot, deadlineSection, encodeSearch, parseSearch } from '../layers/core/composables/taskState'
 import { applyEntityMessage, parseEntityMessage } from '../layers/core/composables/useEntityChannel'
 
@@ -65,5 +66,13 @@ describe('P1 BroadcastChannel message safety', () => {
     const message = parseEntityMessage(data)
     expect(message).toBeUndefined()
     expect(applyEntityMessage('task', task, message)).toEqual(task)
+  })
+})
+
+describe('critical fetch ordering', () => {
+  it('schedules prefetch only after the render tick', async () => {
+    const events: string[] = ['critical', 'render']
+    await schedulePrefetch(async () => { events.push('prefetch') })
+    expect(events).toEqual(['critical', 'render', 'prefetch'])
   })
 })

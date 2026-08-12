@@ -179,3 +179,10 @@
 - Tool calls invoke the same Task, Catalog, Relation, Confirmation, and Google Application use cases as HTTP; Domain completion/cycle/tenant rules are not duplicated or bypassed.
 - Added a production MCP command backed by PostgreSQL and a durable Google sync job table/queue adapter via additive migration 0005.
 - Fresh PostgreSQL and full Go race suites pass.
+## 2026-08-13 — Phase 7 critical rendering and real API data
+
+- Replaced static Task, Genre, Dashboard, Search, Gantt, and Top-page sample arrays with typed calls to the real same-origin API.
+- Added a reusable critical-data composable: route-critical data is awaited/rendered first, then likely next-navigation data is prefetched after Vue's render tick.
+- Task detail renders the Task before concurrently prefetching its hierarchy and dependencies; loading/error states use accessible live roles.
+- Search retains URL/bookmark/back-forward state while discarding stale out-of-order responses; Genre filters come from the API.
+- Warp-inspired layout/styles were preserved. Frontend 22 tests, lint, strict typecheck, and production build pass.
