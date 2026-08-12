@@ -155,3 +155,8 @@
 - Confirmed mutations revalidate target versions and affected date before-values inside the transaction; stale state rolls back. Task deletion remains Web-only and is absent from MCP.
 - API startup now requires PostgreSQL and both internal-binding and impact-token secrets, runs migrations, listens on loopback, and shuts down gracefully.
 - Live PostgreSQL tests cover create, confirmed Leaf-to-Parent conversion, search/tree isolation, patch, recursive preview, and confirmed soft deletion.
+## 2026-08-13 — Phase 4 dashboard routing and contract gate
+
+- Added global and Genre-scoped dashboard routes using the shared tenant-scoped Task read model and the same progress/deadline projection as search and tree responses.
+- All Phase 4 domain routes are registered with chi; Google-specific routes remain owned by the Phase 5 subsystem.
+- OpenAPI/MCP contract validation and all contract unit tests pass against the implemented DTO/security invariants.

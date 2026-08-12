@@ -60,6 +60,8 @@ func NewRouter(handler Handler) http.Handler {
 	router.Get("/v1/task-types/{taskTypeId}", handler.getTaskType)
 	router.Patch("/v1/task-types/{taskTypeId}", handler.renameTaskType)
 	router.Delete("/v1/task-types/{taskTypeId}", handler.deleteTaskType)
+	router.Get("/v1/dashboard", handler.getDashboard)
+	router.Get("/v1/dashboard/genres/{genreId}", handler.getGenreDashboard)
 	router.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	})
@@ -67,6 +69,25 @@ func NewRouter(handler Handler) http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 	})
 	return router
+}
+
+type dashboardResponse struct {
+	Tasks []taskResponse `json:"tasks"`
+}
+
+func (h Handler) getDashboard(w http.ResponseWriter, r *http.Request) { h.writeDashboard(w, r, nil) }
+func (h Handler) getGenreDashboard(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "genreId")
+	h.writeDashboard(w, r, []string{id})
+}
+func (h Handler) writeDashboard(w http.ResponseWriter, r *http.Request, genres []string) {
+	userID, _ := UserID(r.Context())
+	tasks, err := h.Tasks.Search(r.Context(), userID, domain.TaskSearch{GenreIDs: genres})
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, dashboardResponse{Tasks: projectTaskResponses(tasks, time.Now().UTC())})
 }
 
 type dependencyRequest struct {

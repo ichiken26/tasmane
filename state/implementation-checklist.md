@@ -39,13 +39,13 @@
 - [x] optimistic lock
 
 ## Phase 4 HTTP
-- [ ] chi routes
+- [x] chi routes
 - [x] injected user context middleware
 - [x] Worker Binding/internal-only Go ingress
 - [x] DTO validation
 - [x] domain error mapping
 - [x] ImpactPlan preview/confirm protocol
-- [ ] OpenAPI conformance
+- [x] OpenAPI conformance
 
 ## Phase 5 Google Tasks
 - [ ] encrypted token persistence abstraction
