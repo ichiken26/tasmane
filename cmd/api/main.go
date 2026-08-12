@@ -20,9 +20,10 @@ import (
 
 func main() {
 	secret := os.Getenv("TASMANE_INTERNAL_BINDING_SECRET")
+	impactSecret := os.Getenv("TASMANE_IMPACT_TOKEN_SECRET")
 	databaseURL := os.Getenv("DATABASE_URL")
-	if secret == "" || databaseURL == "" {
-		log.Fatal("TASMANE_INTERNAL_BINDING_SECRET and DATABASE_URL are required")
+	if secret == "" || impactSecret == "" || len(impactSecret) < 32 || databaseURL == "" {
+		log.Fatal("TASMANE_INTERNAL_BINDING_SECRET, 32-byte TASMANE_IMPACT_TOKEN_SECRET, and DATABASE_URL are required")
 	}
 	database, err := sql.Open("pgx", databaseURL)
 	if err != nil {
@@ -44,6 +45,7 @@ func main() {
 		Catalog:       application.Catalog{Repo: store},
 		Relations:     application.Relations{Repo: store},
 		Confirmations: application.Confirmations{Repo: store},
+		ImpactTokens:  application.ImpactTokens{Secret: []byte(impactSecret)},
 	})
 	server := &http.Server{
 		Addr:              "127.0.0.1:8080",

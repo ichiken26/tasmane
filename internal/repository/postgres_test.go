@@ -37,9 +37,11 @@ func TestPostgresTaskGetDerivesParentAndCompletionGuards(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 	mock.ExpectQuery("WITH RECURSIVE descendants").WithArgs("task-1", "user-1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "user_id", "status", "leaf_progress", "version", "has_children",
+			"id", "user_id", "genre_id", "task_type_id", "parent_task_id", "title", "body",
+			"status", "leaf_progress", "start_at", "end_at", "is_all_day", "manual_priority", "version", "has_children",
 			"incomplete_descendants", "unresolved_confirmations",
-		}).AddRow("task-1", "user-1", "IN_PROGRESS", nil, 4, true, 2, 1))
+		}).AddRow("task-1", "user-1", "genre-1", nil, nil, "Task", nil,
+			"IN_PROGRESS", nil, nil, nil, true, nil, 4, true, 2, 1))
 
 	got, err := NewPostgres(database, &fixedIDs{}).Get(context.Background(), "user-1", "task-1")
 	if err != nil {
@@ -189,6 +191,9 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 		secondGenreID  = "01890f3e-4c00-7000-8000-000000000108"
 		duplicateID    = "01890f3e-4c00-7000-8000-000000000109"
 		taskTypeID     = "01890f3e-4c00-7000-8000-000000000110"
+		rootTaskID     = "01890f3e-4c00-7000-8000-000000000111"
+		previewChildID = "01890f3e-4c00-7000-8000-000000000112"
+		childTaskID    = "01890f3e-4c00-7000-8000-000000000113"
 	)
 	if _, err := database.Exec(`INSERT INTO users (id, google_subject, email) VALUES
 		($1, 'repo-user', 'repo@example.com'), ($2, 'other-user', 'other@example.com')`, userID, otherUserID); err != nil {
@@ -309,4 +314,39 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	if err := relations.AddDependency(context.Background(), otherUserID, parentID, childID, 1); !errors.Is(err, domain.ErrGraphTaskNotFound) {
 		t.Fatalf("cross-user graph access: %v", err)
 	}
+	creator := NewPostgres(database, &fixedIDs{values: []string{rootTaskID, previewChildID, childTaskID}})
+	rootTask, err := (application.Tasks{Repo: creator}).Create(context.Background(), userID, domain.TaskDraft{
+		GenreID: genreID, Title: "New root", IsAllDay: true,
+	}, domain.TaskCreateAuthorization{})
+	if err != nil || rootTask.ID != rootTaskID || rootTask.Version != 1 {
+		t.Fatalf("create root task: %+v %v", rootTask, err)
+	}
+	if _, err := (application.Tasks{Repo: creator}).Create(context.Background(), userID, domain.TaskDraft{
+		GenreID: genreID, ParentTaskID: stringPointer(rootTaskID), Title: "New child", IsAllDay: true,
+	}, domain.TaskCreateAuthorization{}); !errors.Is(err, domain.ErrImpactConfirmationRequired) {
+		t.Fatalf("first child did not require impact confirmation: %v", err)
+	}
+	createdChild, err := (application.Tasks{Repo: creator}).Create(context.Background(), userID, domain.TaskDraft{
+		GenreID: genreID, ParentTaskID: stringPointer(rootTaskID), Title: "New child", IsAllDay: true,
+	}, domain.TaskCreateAuthorization{AllowLeafConversion: true, ParentVersion: 1})
+	if err != nil || createdChild.ID != childTaskID {
+		t.Fatalf("confirmed child creation: %+v %v", createdChild, err)
+	}
+	var convertedVersion int64
+	if err := database.QueryRow(`SELECT version FROM tasks WHERE id=$1 AND leaf_progress IS NULL`, rootTaskID).Scan(&convertedVersion); err != nil || convertedVersion != 2 {
+		t.Fatalf("converted parent version=%d err=%v", convertedVersion, err)
+	}
+	searched, err := (application.Tasks{Repo: creator}).Search(context.Background(), userID, domain.TaskSearch{Query: "new", GenreIDs: []string{genreID}})
+	if err != nil || len(searched) != 2 {
+		t.Fatalf("search tasks: %+v %v", searched, err)
+	}
+	tree, err := (application.Tasks{Repo: creator}).Tree(context.Background(), userID, childTaskID)
+	if err != nil || len(tree) != 2 {
+		t.Fatalf("task tree: %+v %v", tree, err)
+	}
+	if _, err := (application.Tasks{Repo: creator}).Tree(context.Background(), otherUserID, childTaskID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("cross-user tree: %v", err)
+	}
 }
+
+func stringPointer(value string) *string { return &value }

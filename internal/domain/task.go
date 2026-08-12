@@ -1,6 +1,10 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 type Status string
 
@@ -11,14 +15,75 @@ const (
 )
 
 var (
-	ErrInvalidTransition   = errors.New("invalid task transition")
-	ErrNotCompletable      = errors.New("task is not completable")
-	ErrVersionConflict     = errors.New("version conflict")
-	ErrForbidden           = errors.New("forbidden")
-	ErrParentNeedsChildren = errors.New("parent needs children")
-	ErrInvalidProgress     = errors.New("invalid progress")
-	ErrInvalidPriority     = errors.New("invalid priority")
+	ErrInvalidTransition          = errors.New("invalid task transition")
+	ErrNotCompletable             = errors.New("task is not completable")
+	ErrVersionConflict            = errors.New("version conflict")
+	ErrForbidden                  = errors.New("forbidden")
+	ErrParentNeedsChildren        = errors.New("parent needs children")
+	ErrInvalidProgress            = errors.New("invalid progress")
+	ErrInvalidPriority            = errors.New("invalid priority")
+	ErrInvalidTaskInput           = errors.New("invalid task input")
+	ErrImpactConfirmationRequired = errors.New("impact confirmation required")
 )
+
+type TaskDraft struct {
+	GenreID        string
+	TaskTypeID     *string
+	ParentTaskID   *string
+	Title          string
+	Body           *string
+	StartAt        *time.Time
+	EndAt          *time.Time
+	IsAllDay       bool
+	ManualPriority *Priority
+}
+
+type TaskCreateAuthorization struct {
+	AllowLeafConversion bool
+	ParentVersion       int64
+}
+
+type TaskSearch struct {
+	Query    string
+	GenreIDs []string
+	Priority *Priority
+	Deadline string
+}
+
+func NewTask(id, userID string, draft TaskDraft) (Task, error) {
+	if id == "" || userID == "" {
+		return Task{}, ErrInvalidTaskInput
+	}
+	if err := ValidateTaskDraft(&draft); err != nil {
+		return Task{}, err
+	}
+	draft.Title = strings.TrimSpace(draft.Title)
+	return Task{
+		ID: id, UserID: userID, GenreID: draft.GenreID, TaskTypeID: draft.TaskTypeID,
+		ParentTaskID: draft.ParentTaskID, Title: draft.Title, Body: draft.Body,
+		Status: NotStarted, StartAt: draft.StartAt, EndAt: draft.EndAt,
+		IsAllDay: draft.IsAllDay, ManualPriority: draft.ManualPriority, Version: 1,
+	}, nil
+}
+
+func ValidateTaskDraft(draft *TaskDraft) error {
+	if draft == nil {
+		return ErrInvalidTaskInput
+	}
+	draft.Title = strings.TrimSpace(draft.Title)
+	if draft.GenreID == "" || draft.Title == "" {
+		return ErrInvalidTaskInput
+	}
+	if invalidDateRange(draft.StartAt, draft.EndAt) {
+		return ErrInvalidDateRange
+	}
+	if draft.ManualPriority != nil {
+		if _, ok := priorityWeight(*draft.ManualPriority); !ok {
+			return ErrInvalidPriority
+		}
+	}
+	return nil
+}
 
 type Priority string
 
@@ -35,8 +100,17 @@ type ProgressContribution struct {
 
 type Task struct {
 	ID, UserID              string
+	GenreID                 string
+	TaskTypeID              *string
+	ParentTaskID            *string
+	Title                   string
+	Body                    *string
 	Status                  Status
 	Progress                *int
+	StartAt                 *time.Time
+	EndAt                   *time.Time
+	IsAllDay                bool
+	ManualPriority          *Priority
 	Version                 int64
 	HasChildren             bool
 	IncompleteDescendants   int

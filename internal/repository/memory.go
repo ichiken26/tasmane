@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"tasmane/internal/domain"
 )
@@ -19,6 +20,17 @@ func NewMemory(tasks ...domain.Task) *Memory {
 		m.Tasks[t.ID] = t
 	}
 	return m
+}
+func (m *Memory) Create(_ context.Context, userID string, draft domain.TaskDraft, _ domain.TaskCreateAuthorization) (domain.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := fmt.Sprintf("task-%d", len(m.Tasks)+1)
+	task, err := domain.NewTask(id, userID, draft)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	m.Tasks[id] = task
+	return task, nil
 }
 func (m *Memory) Get(_ context.Context, userID, id string) (domain.Task, error) {
 	m.mu.Lock()

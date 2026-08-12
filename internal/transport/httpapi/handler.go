@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ type Handler struct {
 	Catalog       application.Catalog
 	Relations     application.Relations
 	Confirmations application.Confirmations
+	ImpactTokens  application.ImpactTokens
 }
 
 type transitionRequest struct {
@@ -34,6 +36,10 @@ func NewRouter(handler Handler) http.Handler {
 	router := chi.NewRouter()
 	router.Use(identityOverrideGuard)
 	router.Post("/v1/tasks/{taskId}/transition", handler.transitionTask)
+	router.Get("/v1/tasks/{taskId}", handler.getTask)
+	router.Post("/v1/tasks", handler.createTask)
+	router.Get("/v1/tasks", handler.searchTasks)
+	router.Get("/v1/tasks/{taskId}/tree", handler.getTaskTree)
 	router.Get("/v1/tasks/{taskId}/dependencies", handler.listDependencies)
 	router.Post("/v1/tasks/{taskId}/dependencies", handler.addDependency)
 	router.Get("/v1/tasks/{taskId}/confirmations", handler.listConfirmations)
@@ -375,8 +381,235 @@ func (h Handler) transitionTask(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, output)
+	writeJSON(w, http.StatusOK, toTaskResponse(output, time.Now().UTC()))
 }
+
+type taskResponse struct {
+	ID                string           `json:"id"`
+	GenreID           string           `json:"genreId"`
+	TaskTypeID        *string          `json:"taskTypeId"`
+	ParentTaskID      *string          `json:"parentTaskId"`
+	Title             string           `json:"title"`
+	Body              *string          `json:"body"`
+	Status            domain.Status    `json:"status"`
+	Progress          *int             `json:"progress"`
+	StartAt           *time.Time       `json:"startAt"`
+	EndAt             *time.Time       `json:"endAt"`
+	IsAllDay          bool             `json:"isAllDay"`
+	ManualPriority    *domain.Priority `json:"manualPriority"`
+	EffectivePriority domain.Priority  `json:"effectivePriority"`
+	IsOverdue         bool             `json:"isOverdue"`
+	ShowFire          bool             `json:"showFire"`
+	Version           int64            `json:"version"`
+}
+
+func toTaskResponse(task domain.Task, now time.Time) taskResponse {
+	effectivePriority := domain.MediumPriority
+	if task.ManualPriority != nil {
+		effectivePriority = *task.ManualPriority
+	}
+	overdue := task.Status != domain.Completed && task.EndAt != nil && task.EndAt.Before(now)
+	return taskResponse{
+		ID: task.ID, GenreID: task.GenreID, TaskTypeID: task.TaskTypeID,
+		ParentTaskID: task.ParentTaskID, Title: task.Title, Body: task.Body,
+		Status: task.Status, Progress: task.Progress, StartAt: task.StartAt, EndAt: task.EndAt,
+		IsAllDay: task.IsAllDay, ManualPriority: task.ManualPriority,
+		EffectivePriority: effectivePriority, IsOverdue: overdue, ShowFire: overdue, Version: task.Version,
+	}
+}
+
+func (h Handler) getTask(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	value, err := h.Tasks.Get(r.Context(), userID, chi.URLParam(r, "taskId"))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toTaskResponse(value, time.Now().UTC()))
+}
+
+func (h Handler) searchTasks(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	var priority *domain.Priority
+	if value := strings.ToUpper(r.URL.Query().Get("priority")); value != "" {
+		candidate := domain.Priority(value)
+		if candidate != domain.HighPriority && candidate != domain.MediumPriority && candidate != domain.LowPriority {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid priority")
+			return
+		}
+		priority = &candidate
+	}
+	genres := []string{}
+	if value := r.URL.Query().Get("genres"); value != "" {
+		for _, genre := range strings.Split(value, ",") {
+			if genre = strings.TrimSpace(genre); genre != "" {
+				genres = append(genres, genre)
+			}
+		}
+	}
+	values, err := h.Tasks.Search(r.Context(), userID, domain.TaskSearch{
+		Query: r.URL.Query().Get("q"), GenreIDs: genres, Priority: priority,
+		Deadline: r.URL.Query().Get("deadline"),
+	})
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, projectTaskResponses(values, time.Now().UTC()))
+}
+
+func (h Handler) getTaskTree(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	values, err := h.Tasks.Tree(r.Context(), userID, chi.URLParam(r, "taskId"))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, projectTaskResponses(values, time.Now().UTC()))
+}
+
+func projectTaskResponses(tasks []domain.Task, now time.Time) []taskResponse {
+	deadlineTasks := make([]domain.DeadlineTask, 0, len(tasks))
+	for _, task := range tasks {
+		parentID := ""
+		if task.ParentTaskID != nil {
+			parentID = *task.ParentTaskID
+		}
+		deadlineTasks = append(deadlineTasks, domain.DeadlineTask{ID: task.ID, ParentID: parentID, Status: task.Status, EndAt: task.EndAt})
+	}
+	deadlineStates, _ := domain.ProjectDeadlineState(deadlineTasks, now)
+	byParent := map[string][]domain.Task{}
+	for _, task := range tasks {
+		if task.ParentTaskID != nil {
+			byParent[*task.ParentTaskID] = append(byParent[*task.ParentTaskID], task)
+		}
+	}
+	progressMemo := map[string]int{}
+	var progress func(domain.Task) int
+	progress = func(task domain.Task) int {
+		if value, ok := progressMemo[task.ID]; ok {
+			return value
+		}
+		children := byParent[task.ID]
+		if len(children) == 0 {
+			if task.Progress != nil {
+				return *task.Progress
+			}
+			return 0
+		}
+		contributions := make([]domain.ProgressContribution, 0, len(children))
+		for _, child := range children {
+			value := progress(child)
+			priority := domain.MediumPriority
+			if child.ManualPriority != nil {
+				priority = *child.ManualPriority
+			}
+			contributions = append(contributions, domain.ProgressContribution{Progress: &value, EffectivePriority: priority})
+		}
+		value, _ := domain.ParentProgress(task.Status, contributions)
+		progressMemo[task.ID] = value
+		return value
+	}
+	result := make([]taskResponse, 0, len(tasks))
+	for _, task := range tasks {
+		response := toTaskResponse(task, now)
+		if task.HasChildren {
+			value := progress(task)
+			response.Progress = &value
+		}
+		state := deadlineStates[task.ID]
+		response.IsOverdue, response.ShowFire = state.IsOverdue, state.ShowFire
+		result = append(result, response)
+	}
+	return result
+}
+
+type createTaskRequest struct {
+	Title          string           `json:"title"`
+	Body           *string          `json:"body"`
+	GenreID        string           `json:"genreId"`
+	TaskTypeID     *string          `json:"taskTypeId"`
+	ParentTaskID   *string          `json:"parentTaskId"`
+	StartAt        *time.Time       `json:"startAt"`
+	EndAt          *time.Time       `json:"endAt"`
+	IsAllDay       *bool            `json:"isAllDay"`
+	ManualPriority *domain.Priority `json:"manualPriority"`
+	ImpactToken    *string          `json:"impactToken"`
+}
+
+func (h Handler) createTask(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	var input createTaskRequest
+	if decodeJSON(w, r, &input) != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	isAllDay := true
+	if input.IsAllDay != nil {
+		isAllDay = *input.IsAllDay
+	}
+	draft := domain.TaskDraft{
+		GenreID: input.GenreID, TaskTypeID: input.TaskTypeID, ParentTaskID: input.ParentTaskID,
+		Title: input.Title, Body: input.Body, StartAt: input.StartAt, EndAt: input.EndAt,
+		IsAllDay: isAllDay, ManualPriority: input.ManualPriority,
+	}
+	authorization := domain.TaskCreateAuthorization{}
+	if input.ParentTaskID != nil && input.ImpactToken != nil {
+		parent, getErr := h.Tasks.Get(r.Context(), userID, *input.ParentTaskID)
+		if getErr != nil {
+			writeDomainError(w, getErr)
+			return
+		}
+		claims := application.ImpactClaims{UserID: userID, Operation: "ADD_FIRST_CHILD", ResourceID: parent.ID, Version: parent.Version}
+		if verifyErr := h.ImpactTokens.Verify(*input.ImpactToken, claims); verifyErr != nil {
+			writeError(w, http.StatusConflict, "IMPACT_TOKEN_INVALID", "impact token is invalid or stale")
+			return
+		}
+		authorization = domain.TaskCreateAuthorization{AllowLeafConversion: true, ParentVersion: parent.Version}
+	}
+	value, err := h.Tasks.Create(r.Context(), userID, draft, authorization)
+	if err != nil {
+		if errors.Is(err, domain.ErrImpactConfirmationRequired) && input.ParentTaskID != nil {
+			parent, getErr := h.Tasks.Get(r.Context(), userID, *input.ParentTaskID)
+			if getErr != nil {
+				writeDomainError(w, getErr)
+				return
+			}
+			token, issueErr := h.ImpactTokens.Issue(application.ImpactClaims{
+				UserID: userID, Operation: "ADD_FIRST_CHILD", ResourceID: parent.ID, Version: parent.Version,
+			})
+			if issueErr != nil {
+				writeDomainError(w, issueErr)
+				return
+			}
+			writeJSON(w, http.StatusConflict, impactPlanResponse{
+				Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token,
+				AffectedEntities: []impactEntityResponse{{ID: parent.ID, Type: "TASK", Title: &parent.Title, Reason: stringPointer("LEAF_TO_PARENT")}},
+				Warnings:         []string{"進捗率は自動で再計算されます。子タスクを追加しますか？"},
+			})
+			return
+		}
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toTaskResponse(value, time.Now().UTC()))
+}
+
+type impactEntityResponse struct {
+	ID     string  `json:"id"`
+	Type   string  `json:"type"`
+	Title  *string `json:"title"`
+	Reason *string `json:"reason"`
+}
+
+type impactPlanResponse struct {
+	Code             string                 `json:"code"`
+	ImpactToken      string                 `json:"impactToken"`
+	AffectedEntities []impactEntityResponse `json:"affectedEntities"`
+	Warnings         []string               `json:"warnings"`
+}
+
+func stringPointer(value string) *string { return &value }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -400,10 +633,13 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrNameRequired), errors.Is(err, domain.ErrInvalidConfirmationInput):
 		status, code = http.StatusUnprocessableEntity, "DOMAIN_VALIDATION_FAILED"
 	case errors.Is(err, domain.ErrVersionConflict), errors.Is(err, domain.ErrNotCompletable),
+		errors.Is(err, domain.ErrImpactConfirmationRequired),
 		errors.Is(err, domain.ErrResourceInUse), errors.Is(err, domain.ErrConflict),
 		errors.Is(err, domain.ErrHierarchyCycle), errors.Is(err, domain.ErrDependencyCycle),
 		errors.Is(err, domain.ErrGraphOwnership), errors.Is(err, domain.ErrGraphGenre):
 		status, code = http.StatusConflict, "CONFLICT"
+	case errors.Is(err, application.ErrInvalidImpactToken):
+		status, code = http.StatusConflict, "IMPACT_TOKEN_INVALID"
 	}
 	writeError(w, status, code, err.Error())
 }

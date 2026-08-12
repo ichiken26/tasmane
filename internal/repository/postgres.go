@@ -34,7 +34,9 @@ const taskGetSQL = `WITH RECURSIVE descendants AS (
   JOIN descendants parent ON child.parent_task_id = parent.id
   WHERE child.user_id = $2 AND child.deleted_at IS NULL
 )
-SELECT t.id, t.user_id, t.status, t.leaf_progress, t.version,
+SELECT t.id, t.user_id, t.genre_id, t.task_type_id, t.parent_task_id,
+       t.title, t.body, t.status, t.leaf_progress, t.start_at, t.end_at,
+       t.is_all_day, t.manual_priority, t.version,
        EXISTS (
          SELECT 1 FROM tasks child
          WHERE child.parent_task_id = t.id AND child.user_id = t.user_id AND child.deleted_at IS NULL
@@ -53,8 +55,12 @@ func (p *Postgres) Get(ctx context.Context, userID, taskID string) (domain.Task,
 	var task domain.Task
 	var status string
 	var progress sql.NullInt64
+	var taskTypeID, parentTaskID, body, manualPriority sql.NullString
+	var startAt, endAt sql.NullTime
 	err := p.database.QueryRowContext(ctx, taskGetSQL, taskID, userID).Scan(
-		&task.ID, &task.UserID, &status, &progress, &task.Version, &task.HasChildren,
+		&task.ID, &task.UserID, &task.GenreID, &taskTypeID, &parentTaskID,
+		&task.Title, &body, &status, &progress, &startAt, &endAt,
+		&task.IsAllDay, &manualPriority, &task.Version, &task.HasChildren,
 		&task.IncompleteDescendants, &task.UnresolvedConfirmations,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -64,9 +70,28 @@ func (p *Postgres) Get(ctx context.Context, userID, taskID string) (domain.Task,
 		return domain.Task{}, fmt.Errorf("get task: %w", err)
 	}
 	task.Status = domain.Status(status)
+	if taskTypeID.Valid {
+		task.TaskTypeID = &taskTypeID.String
+	}
+	if parentTaskID.Valid {
+		task.ParentTaskID = &parentTaskID.String
+	}
+	if body.Valid {
+		task.Body = &body.String
+	}
 	if progress.Valid {
 		value := int(progress.Int64)
 		task.Progress = &value
+	}
+	if startAt.Valid {
+		task.StartAt = &startAt.Time
+	}
+	if endAt.Valid {
+		task.EndAt = &endAt.Time
+	}
+	if manualPriority.Valid {
+		value := domain.Priority(manualPriority.String)
+		task.ManualPriority = &value
 	}
 	return task.ForPersistence(), nil
 }

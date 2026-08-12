@@ -3,7 +3,27 @@ package domain
 import (
 	"errors"
 	"testing"
+	"time"
 )
+
+func TestNewTaskValidatesAndNormalizesDraft(t *testing.T) {
+	start, end := day(10), day(9)
+	if _, err := NewTask("id", "user", TaskDraft{GenreID: "genre", Title: "   "}); !errors.Is(err, ErrInvalidTaskInput) {
+		t.Fatalf("blank title: %v", err)
+	}
+	if _, err := NewTask("id", "user", TaskDraft{GenreID: "genre", Title: "Task", StartAt: &start, EndAt: &end}); !errors.Is(err, ErrInvalidDateRange) {
+		t.Fatalf("date range: %v", err)
+	}
+	invalidPriority := Priority("URGENT")
+	if _, err := NewTask("id", "user", TaskDraft{GenreID: "genre", Title: "Task", ManualPriority: &invalidPriority}); !errors.Is(err, ErrInvalidPriority) {
+		t.Fatalf("priority: %v", err)
+	}
+	end = start.Add(time.Hour)
+	got, err := NewTask("id", "user", TaskDraft{GenreID: "genre", Title: "  Task  ", StartAt: &start, EndAt: &end, IsAllDay: true})
+	if err != nil || got.Title != "Task" || got.Status != NotStarted || got.Progress != nil || got.Version != 1 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
 
 func TestTransitionFSMAndCompletionInvariant(t *testing.T) {
 	base := Task{Status: NotStarted}
