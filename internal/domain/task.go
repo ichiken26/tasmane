@@ -50,6 +50,11 @@ type TaskSearch struct {
 	Deadline string
 }
 
+type TaskUpdate struct {
+	Task        Task
+	DateChanges []DateChange
+}
+
 func NewTask(id, userID string, draft TaskDraft) (Task, error) {
 	if id == "" || userID == "" {
 		return Task{}, ErrInvalidTaskInput

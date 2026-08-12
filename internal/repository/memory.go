@@ -55,3 +55,34 @@ func (m *Memory) UpdateStatus(_ context.Context, t domain.Task, expected int64, 
 	m.Tasks[t.ID] = t
 	return t, nil
 }
+func (m *Memory) Update(_ context.Context, update domain.TaskUpdate, expected int64) (domain.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.Tasks[update.Task.ID]
+	if !ok || current.UserID != update.Task.UserID {
+		return domain.Task{}, domain.ErrForbidden
+	}
+	if current.Version != expected {
+		return domain.Task{}, domain.ErrVersionConflict
+	}
+	update.Task.Version = expected + 1
+	m.Tasks[update.Task.ID] = update.Task
+	return update.Task, nil
+}
+func (m *Memory) DeleteTask(_ context.Context, userID, taskID string, expected int64, confirmed bool) (domain.TaskDeletionPlan, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.Tasks[taskID]
+	if !ok || task.UserID != userID {
+		return domain.TaskDeletionPlan{}, domain.ErrForbidden
+	}
+	if task.Version != expected {
+		return domain.TaskDeletionPlan{}, domain.ErrVersionConflict
+	}
+	plan := domain.TaskDeletionPlan{TaskIDs: []string{taskID}}
+	if !confirmed {
+		return plan, domain.ErrImpactConfirmationRequired
+	}
+	delete(m.Tasks, taskID)
+	return plan, nil
+}

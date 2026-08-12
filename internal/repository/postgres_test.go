@@ -347,6 +347,22 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	if _, err := (application.Tasks{Repo: creator}).Tree(context.Background(), otherUserID, childTaskID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-user tree: %v", err)
 	}
+	rootTask.Title = "Renamed root"
+	patched, err := (application.Tasks{Repo: creator}).Update(context.Background(), userID, domain.TaskUpdate{Task: rootTask}, 2)
+	if err != nil || patched.Title != "Renamed root" || patched.Version != 3 {
+		t.Fatalf("patch task: %+v %v", patched, err)
+	}
+	deletePlan, err := (application.Tasks{Repo: creator}).Delete(context.Background(), userID, rootTaskID, 3, false)
+	if !errors.Is(err, domain.ErrImpactConfirmationRequired) || len(deletePlan.TaskIDs) != 2 {
+		t.Fatalf("delete preview: %+v %v", deletePlan, err)
+	}
+	deletePlan, err = (application.Tasks{Repo: creator}).Delete(context.Background(), userID, rootTaskID, 3, true)
+	if err != nil || len(deletePlan.TaskIDs) != 2 {
+		t.Fatalf("confirmed delete: %+v %v", deletePlan, err)
+	}
+	if _, err := creator.Get(context.Background(), userID, childTaskID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("deleted child visible: %v", err)
+	}
 }
 
 func stringPointer(value string) *string { return &value }

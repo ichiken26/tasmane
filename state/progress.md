@@ -147,3 +147,11 @@
 - Parent and dependency writes acquire a per-user PostgreSQL advisory transaction lock, reload the graph inside the lock, and call the shared Domain cycle/ownership/Genre validators immediately before persistence.
 - Duplicate dependency insertion is a domain conflict; missing/cross-user rows remain hidden; removal is owner-scoped.
 - Unit tests prove repository-level revalidation and rollback, while live tests cover shared Application writes, persisted listing, cycle rejection, and cross-user isolation.
+## 2026-08-13 — Phase 4 chi Task API and Impact confirmation
+
+- Replaced manual path parsing with chi routing and connected real PostgreSQL-backed Task, Genre, TaskType, Dependency, and Confirmation use cases through the authenticated user context.
+- Task create/get/search/tree/update/delete are implemented with lower-camel DTOs, optimistic versions, tenant/soft-delete isolation, root/subtree reads, derived parent progress, and overdue/fire projections.
+- First-child conversion, date propagation, and recursive Task deletion use a shared 409 ImpactPlan flow with HMAC-SHA256 tokens bound to user, operation, resource version, and five-minute expiry.
+- Confirmed mutations revalidate target versions and affected date before-values inside the transaction; stale state rolls back. Task deletion remains Web-only and is absent from MCP.
+- API startup now requires PostgreSQL and both internal-binding and impact-token secrets, runs migrations, listens on loopback, and shuts down gracefully.
+- Live PostgreSQL tests cover create, confirmed Leaf-to-Parent conversion, search/tree isolation, patch, recursive preview, and confirmed soft deletion.

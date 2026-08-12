@@ -44,7 +44,7 @@
 - [x] Worker Binding/internal-only Go ingress
 - [x] DTO validation
 - [x] domain error mapping
-- [ ] ImpactPlan preview/confirm protocol
+- [x] ImpactPlan preview/confirm protocol
 - [ ] OpenAPI conformance
 
 ## Phase 5 Google Tasks

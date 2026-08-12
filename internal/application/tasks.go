@@ -10,6 +10,30 @@ type Repository interface {
 	Create(context.Context, string, domain.TaskDraft, domain.TaskCreateAuthorization) (domain.Task, error)
 	Get(context.Context, string, string) (domain.Task, error)
 	UpdateStatus(context.Context, domain.Task, int64, string) (domain.Task, error)
+	Update(context.Context, domain.TaskUpdate, int64) (domain.Task, error)
+	DeleteTask(context.Context, string, string, int64, bool) (domain.TaskDeletionPlan, error)
+}
+
+func (u Tasks) Delete(ctx context.Context, userID, taskID string, expected int64, confirmed bool) (domain.TaskDeletionPlan, error) {
+	if userID == "" || taskID == "" || expected < 1 {
+		return domain.TaskDeletionPlan{}, domain.ErrForbidden
+	}
+	return u.Repo.DeleteTask(ctx, userID, taskID, expected, confirmed)
+}
+
+func (u Tasks) Update(ctx context.Context, userID string, update domain.TaskUpdate, expected int64) (domain.Task, error) {
+	if userID == "" || update.Task.UserID != userID || expected < 1 {
+		return domain.Task{}, domain.ErrForbidden
+	}
+	draft := domain.TaskDraft{GenreID: update.Task.GenreID, TaskTypeID: update.Task.TaskTypeID,
+		ParentTaskID: update.Task.ParentTaskID, Title: update.Task.Title, Body: update.Task.Body,
+		StartAt: update.Task.StartAt, EndAt: update.Task.EndAt, IsAllDay: update.Task.IsAllDay,
+		ManualPriority: update.Task.ManualPriority}
+	if err := domain.ValidateTaskDraft(&draft); err != nil {
+		return domain.Task{}, err
+	}
+	update.Task.Title = draft.Title
+	return u.Repo.Update(ctx, update, expected)
 }
 
 type TaskReadRepository interface {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,8 @@ func NewRouter(handler Handler) http.Handler {
 	router.Use(identityOverrideGuard)
 	router.Post("/v1/tasks/{taskId}/transition", handler.transitionTask)
 	router.Get("/v1/tasks/{taskId}", handler.getTask)
+	router.Patch("/v1/tasks/{taskId}", handler.updateTask)
+	router.Delete("/v1/tasks/{taskId}", handler.deleteTask)
 	router.Post("/v1/tasks", handler.createTask)
 	router.Get("/v1/tasks", handler.searchTasks)
 	router.Get("/v1/tasks/{taskId}/tree", handler.getTaskTree)
@@ -428,6 +431,45 @@ func (h Handler) getTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toTaskResponse(value, time.Now().UTC()))
 }
 
+func (h Handler) deleteTask(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	taskID := chi.URLParam(r, "taskId")
+	expected, err := strconv.ParseInt(r.URL.Query().Get("expectedVersion"), 10, 64)
+	if err != nil || expected < 1 {
+		writeError(w, 400, "INVALID_REQUEST", "invalid expectedVersion")
+		return
+	}
+	token := r.URL.Query().Get("impactToken")
+	confirmed := false
+	claims := application.ImpactClaims{UserID: userID, Operation: "DELETE_TASK", ResourceID: taskID, Version: expected}
+	if token != "" {
+		if h.ImpactTokens.Verify(token, claims) != nil {
+			writeError(w, 409, "IMPACT_TOKEN_INVALID", "impact token is invalid or stale")
+			return
+		}
+		confirmed = true
+	}
+	plan, deleteErr := h.Tasks.Delete(r.Context(), userID, taskID, expected, confirmed)
+	if errors.Is(deleteErr, domain.ErrImpactConfirmationRequired) {
+		issued, issueErr := h.ImpactTokens.Issue(claims)
+		if issueErr != nil {
+			writeDomainError(w, issueErr)
+			return
+		}
+		entities := make([]impactEntityResponse, 0, len(plan.TaskIDs))
+		for _, id := range plan.TaskIDs {
+			entities = append(entities, impactEntityResponse{ID: id, Type: "TASK", Reason: stringPointer("SOFT_DELETE")})
+		}
+		writeJSON(w, 409, impactPlanResponse{Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: issued, AffectedEntities: entities, Warnings: []string{"これらのタスクも削除されます。よろしいですか？"}})
+		return
+	}
+	if deleteErr != nil {
+		writeDomainError(w, deleteErr)
+		return
+	}
+	w.WriteHeader(204)
+}
+
 func (h Handler) searchTasks(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var priority *domain.Priority
@@ -535,6 +577,115 @@ type createTaskRequest struct {
 	IsAllDay       *bool            `json:"isAllDay"`
 	ManualPriority *domain.Priority `json:"manualPriority"`
 	ImpactToken    *string          `json:"impactToken"`
+}
+
+type patchTaskRequest struct {
+	ExpectedVersion int64            `json:"expectedVersion"`
+	Title           *string          `json:"title"`
+	Body            *string          `json:"body"`
+	GenreID         *string          `json:"genreId"`
+	TaskTypeID      *string          `json:"taskTypeId"`
+	ParentTaskID    *string          `json:"parentTaskId"`
+	StartAt         *time.Time       `json:"startAt"`
+	EndAt           *time.Time       `json:"endAt"`
+	IsAllDay        *bool            `json:"isAllDay"`
+	ManualPriority  *domain.Priority `json:"manualPriority"`
+	ImpactToken     *string          `json:"impactToken"`
+}
+
+func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	taskID := chi.URLParam(r, "taskId")
+	var input patchTaskRequest
+	if decodeJSON(w, r, &input) != nil || input.ExpectedVersion < 1 {
+		writeError(w, 400, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	current, err := h.Tasks.Get(r.Context(), userID, taskID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if input.ExpectedVersion != current.Version {
+		writeDomainError(w, domain.ErrVersionConflict)
+		return
+	}
+	next := current
+	if input.Title != nil {
+		next.Title = *input.Title
+	}
+	if input.Body != nil {
+		next.Body = input.Body
+	}
+	if input.GenreID != nil {
+		next.GenreID = *input.GenreID
+	}
+	if input.TaskTypeID != nil {
+		next.TaskTypeID = input.TaskTypeID
+	}
+	if input.ParentTaskID != nil {
+		next.ParentTaskID = input.ParentTaskID
+	}
+	if input.StartAt != nil {
+		next.StartAt = input.StartAt
+	}
+	if input.EndAt != nil {
+		next.EndAt = input.EndAt
+	}
+	if input.IsAllDay != nil {
+		next.IsAllDay = *input.IsAllDay
+	}
+	if input.ManualPriority != nil {
+		next.ManualPriority = input.ManualPriority
+	}
+	tree, err := h.Tasks.Tree(r.Context(), userID, taskID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	dateTasks := make([]domain.DateTask, 0, len(tree))
+	for _, task := range tree {
+		parent := ""
+		if task.ParentTaskID != nil {
+			parent = *task.ParentTaskID
+		}
+		dateTasks = append(dateTasks, domain.DateTask{ID: task.ID, ParentID: parent, StartAt: task.StartAt, EndAt: task.EndAt})
+	}
+	changes, err := domain.PlanDateChange(dateTasks, taskID, next.StartAt, next.EndAt)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	needsImpact := false
+	for _, change := range changes {
+		if change.TaskID != taskID {
+			needsImpact = true
+		}
+	}
+	claims := application.ImpactClaims{UserID: userID, Operation: "UPDATE_TASK_DATES", ResourceID: taskID, Version: current.Version}
+	if needsImpact && input.ImpactToken == nil {
+		token, issueErr := h.ImpactTokens.Issue(claims)
+		if issueErr != nil {
+			writeDomainError(w, issueErr)
+			return
+		}
+		entities := make([]impactEntityResponse, 0, len(changes))
+		for _, change := range changes {
+			entities = append(entities, impactEntityResponse{ID: change.TaskID, Type: "TASK", Reason: stringPointer("DATE_PROPAGATION")})
+		}
+		writeJSON(w, 409, impactPlanResponse{Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token, AffectedEntities: entities, Warnings: []string{"日付変更により関連タスクの日付も変更されます。"}})
+		return
+	}
+	if needsImpact && h.ImpactTokens.Verify(*input.ImpactToken, claims) != nil {
+		writeError(w, 409, "IMPACT_TOKEN_INVALID", "impact token is invalid or stale")
+		return
+	}
+	updated, err := h.Tasks.Update(r.Context(), userID, domain.TaskUpdate{Task: next, DateChanges: changes}, input.ExpectedVersion)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, 200, toTaskResponse(updated, time.Now().UTC()))
 }
 
 func (h Handler) createTask(w http.ResponseWriter, r *http.Request) {
