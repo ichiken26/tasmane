@@ -122,3 +122,10 @@
 - OD-005 remains enforced by the isolated scoring constants and exact-weight tests; OD-008 remains enforced by internal Binding authentication and contract tests.
 - The new plans are transport-independent so later HTTP, Google queue, and MCP adapters must consume the same decisions.
 - Verification: `go test ./internal/domain`.
+## 2026-08-13 — Phase 3 PostgreSQL Task repository
+
+- Added the production PostgreSQL Task repository with tenant-scoped active-row lookup, recursive incomplete-descendant and unresolved-Confirmation derivation, row locking, optimistic version enforcement, and parent leaf-progress normalization.
+- Status and progress histories are generated as UUIDv7 and inserted in the same transaction as the Task mutation; injected history failure tests prove the Task update rolls back.
+- Added a live fresh-schema repository test covering cross-user hiding, recursive state, parent transition persistence, version increment, and history creation.
+- Hardened the ephemeral PostgreSQL harness by installing required extensions once in `public`, retaining isolated application schemas and deterministic sequential package execution.
+- Verification: repository unit tests and `scripts/test-postgres.sh`.

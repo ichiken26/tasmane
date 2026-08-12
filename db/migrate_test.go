@@ -33,7 +33,7 @@ func TestUpdatedAtProcessWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.RuntimeParams["search_path"] = schema
+	config.RuntimeParams["search_path"] = schema + ", public"
 	database := stdlib.OpenDB(*config)
 	defer database.Close()
 	if _, err := database.Exec(`
@@ -238,7 +238,7 @@ func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.RuntimeParams["search_path"] = schema
+	config.RuntimeParams["search_path"] = schema + ", public"
 	database := stdlib.OpenDB(*config)
 	defer database.Close()
 	if err := Migrate(context.Background(), database); err != nil {

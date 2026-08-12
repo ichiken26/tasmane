@@ -31,5 +31,9 @@ export LD_LIBRARY_PATH="$work_dir/root/usr/lib/x86_64-linux-gnu"
 export TEST_DATABASE_URL="postgres://postgres@127.0.0.1:$port/postgres?sslmode=disable"
 export PATH="/home/ichiken/.local/toolchains/go1.22.12/bin:$PATH"
 export GOFLAGS=-buildvcs=false
+"$pg_bin/psql" "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+  -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public' \
+  -c 'CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public'
 cd "$repo_dir"
 go test -count=1 -run TestMigrationAppliesToFreshPostgresAndEnforcesSchema -v ./db
+go test -count=1 -run TestPostgresTaskRepositoryAgainstFreshSchema -v ./internal/repository

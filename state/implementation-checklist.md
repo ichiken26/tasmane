@@ -30,12 +30,12 @@
 - [x] Resolved OD-001/002/003/005/006/007/008 behaviors covered by tests
 
 ## Phase 3 Repository / UseCases
-- [ ] Task repository
+- [x] Task repository
 - [ ] Genre repository
 - [ ] TaskType repository
 - [ ] Confirmation repository
 - [ ] Dependency repository
-- [ ] history write atomicity
+- [x] history write atomicity
 - [x] optimistic lock
 
 ## Phase 4 HTTP
