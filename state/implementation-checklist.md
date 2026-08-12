@@ -48,21 +48,21 @@
 - [x] OpenAPI conformance
 
 ## Phase 5 Google Tasks
-- [ ] encrypted token persistence abstraction
-- [ ] queue producer
-- [ ] queue consumer
-- [ ] retry classification
-- [ ] field snapshot conflict detection
-- [ ] Google due hierarchy conflict => CONFLICT
-- [ ] dedicated Tasmane Google Task List create/reuse
-- [ ] dedicated Google Task List ID persistence
-- [ ] merge
+- [x] encrypted token persistence abstraction
+- [x] queue producer
+- [x] queue consumer
+- [x] retry classification
+- [x] field snapshot conflict detection
+- [x] Google due hierarchy conflict => CONFLICT
+- [x] dedicated Tasmane Google Task List create/reuse
+- [x] dedicated Google Task List ID persistence
+- [x] merge
 - [x] Google complete via domain
-- [ ] Google uncomplete via domain
-- [ ] deletion conflict
-- [ ] import candidate
-- [ ] per-user sync lock
-- [ ] access-time sync gate
+- [x] Google uncomplete via domain
+- [x] deletion conflict
+- [x] import candidate
+- [x] per-user sync lock
+- [x] access-time sync gate
 
 ## Phase 6 MCP
 - [x] OpenAPI/MCP contract completeness

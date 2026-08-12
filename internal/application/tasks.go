@@ -12,6 +12,14 @@ type Repository interface {
 	UpdateStatus(context.Context, domain.Task, int64, string) (domain.Task, error)
 	Update(context.Context, domain.TaskUpdate, int64) (domain.Task, error)
 	DeleteTask(context.Context, string, string, int64, bool) (domain.TaskDeletionPlan, error)
+	GoogleUncomplete(context.Context, string, string, int64) (domain.Task, error)
+}
+
+func (u Tasks) GoogleUncomplete(ctx context.Context, userID, taskID string, expected int64) (domain.Task, error) {
+	if userID == "" || taskID == "" || expected < 1 {
+		return domain.Task{}, domain.ErrForbidden
+	}
+	return u.Repo.GoogleUncomplete(ctx, userID, taskID, expected)
 }
 
 func (u Tasks) Delete(ctx context.Context, userID, taskID string, expected int64, confirmed bool) (domain.TaskDeletionPlan, error) {

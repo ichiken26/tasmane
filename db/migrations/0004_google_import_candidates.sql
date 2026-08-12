@@ -1,0 +1,5 @@
+BEGIN;
+
+ALTER TABLE google_task_syncs ALTER COLUMN task_id DROP NOT NULL;
+
+COMMIT;

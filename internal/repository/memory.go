@@ -86,3 +86,18 @@ func (m *Memory) DeleteTask(_ context.Context, userID, taskID string, expected i
 	delete(m.Tasks, taskID)
 	return plan, nil
 }
+
+func (m *Memory) GoogleUncomplete(ctx context.Context, userID, taskID string, expected int64) (domain.Task, error) {
+	task, err := m.Get(ctx, userID, taskID)
+	if err != nil {
+		return task, err
+	}
+	if task.Version != expected {
+		return domain.Task{}, domain.ErrVersionConflict
+	}
+	next, err := task.Transition(domain.InProgress)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	return m.UpdateStatus(ctx, next, expected, "GOOGLE_TASKS")
+}

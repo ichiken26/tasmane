@@ -160,3 +160,15 @@
 - Added global and Genre-scoped dashboard routes using the shared tenant-scoped Task read model and the same progress/deadline projection as search and tree responses.
 - All Phase 4 domain routes are registered with chi; Google-specific routes remain owned by the Phase 5 subsystem.
 - OpenAPI/MCP contract validation and all contract unit tests pass against the implemented DTO/security invariants.
+## 2026-08-13 — Phase 5 Google sync foundations
+
+- Added AES-256-GCM refresh-token protection with authenticated tamper detection and PostgreSQL persistence that never accepts plaintext at its boundary.
+- Added queue producer/consumer contracts and tested retry, refresh-and-retry, terminal failure, and sync-state transitions without blocking HTTP requests on Google calls.
+- Added deterministic field snapshot merge/conflict logic and reused the hierarchy date planner to classify Google due changes requiring ancestor propagation as conflict.
+- Added dedicated Tasmane list create/reuse policy and persistence, per-user lease acquisition, settings-driven access-time gate, sync status storage, and Google-only import candidate reads.
+- Additive migration 0004 allows sync candidate records without a local Task; fresh migration and repository suites pass.
+## 2026-08-13 — Phase 5 Google lifecycle policies
+
+- Google due-date parsing preserves the local Task's timezone and hh:mm while rejecting malformed dates; ancestor extension remains a conflict through the shared date planner.
+- Remote Google deletion is classified as CONFLICT and never deletes the local Task automatically.
+- Google uncomplete uses the Task FSM and the PostgreSQL implementation atomically reopens the completed target and every completed ancestor, writing `GOOGLE_TASKS` status history for each mutation.
