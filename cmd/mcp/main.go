@@ -13,9 +13,9 @@ import (
 )
 
 func main() {
-	databaseURL, userID := os.Getenv("DATABASE_URL"), os.Getenv("TASMANE_MCP_USER_ID")
-	if databaseURL == "" || userID == "" {
-		log.Fatal("DATABASE_URL and TASMANE_MCP_USER_ID are required")
+	databaseURL, userID, impactSecret := os.Getenv("DATABASE_URL"), os.Getenv("TASMANE_MCP_USER_ID"), os.Getenv("TASMANE_IMPACT_TOKEN_SECRET")
+	if databaseURL == "" || userID == "" || len(impactSecret) < 32 {
+		log.Fatal("DATABASE_URL, TASMANE_MCP_USER_ID, and a 32+ byte TASMANE_IMPACT_TOKEN_SECRET are required")
 	}
 	database, err := sql.Open("pgx", databaseURL)
 	if err != nil {
@@ -26,7 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 	store := repository.NewPostgres(database, nil)
-	server := mcpserver.Server{UserID: userID, Services: mcpserver.Services{Tasks: application.Tasks{Repo: store}, Catalog: application.Catalog{Repo: store}, Relations: application.Relations{Repo: store}, Confirmations: application.Confirmations{Repo: store}, Google: application.GoogleJobs{Queue: store}, GoogleQueries: application.GoogleQueries{Repo: store}}}
+	server := mcpserver.Server{UserID: userID, Services: mcpserver.Services{Tasks: application.Tasks{Repo: store}, Catalog: application.Catalog{Repo: store}, Relations: application.Relations{Repo: store}, Confirmations: application.Confirmations{Repo: store}, Google: application.GoogleJobs{Queue: store}, GoogleQueries: application.GoogleQueries{Repo: store}, ImpactTokens: application.ImpactTokens{Secret: []byte(impactSecret)}}}
 	if err := server.Serve(context.Background(), os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
 	}

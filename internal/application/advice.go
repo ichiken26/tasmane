@@ -15,9 +15,18 @@ type AdviceProvider interface {
 }
 type AdviceRepository interface {
 	FindAdvice(context.Context, string, *string, string) (domain.Advice, error)
+	LatestAdvice(context.Context, string, *string) (domain.Advice, error)
 	SaveAdvice(context.Context, domain.Advice) (domain.Advice, error)
 	DeleteExpiredAdvice(context.Context, time.Time) (int64, error)
 }
+
+func (a Advices) Current(ctx context.Context, userID string, genreID *string) (domain.Advice, error) {
+	if userID == "" {
+		return domain.Advice{}, domain.ErrForbidden
+	}
+	return a.Repo.LatestAdvice(ctx, userID, genreID)
+}
+
 type Advices struct {
 	Provider AdviceProvider
 	Repo     AdviceRepository

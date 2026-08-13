@@ -24,6 +24,7 @@ var (
 	ErrInvalidPriority            = errors.New("invalid priority")
 	ErrInvalidTaskInput           = errors.New("invalid task input")
 	ErrImpactConfirmationRequired = errors.New("impact confirmation required")
+	ErrImpactPlanChanged          = errors.New("impact plan changed")
 )
 
 type TaskDraft struct {
@@ -53,6 +54,9 @@ type TaskSearch struct {
 type TaskUpdate struct {
 	Task        Task
 	DateChanges []DateChange
+	// ApprovedGenreMove is set only after the caller verifies an impact token.
+	// Repositories recompute and compare it while holding the graph lock.
+	ApprovedGenreMove *GenreMovePlan
 }
 
 func NewTask(id, userID string, draft TaskDraft) (Task, error) {
@@ -117,6 +121,7 @@ type Task struct {
 	IsAllDay                bool
 	ManualPriority          *Priority
 	Version                 int64
+	CreatedAt               time.Time
 	HasChildren             bool
 	IncompleteDescendants   int
 	UnresolvedConfirmations int

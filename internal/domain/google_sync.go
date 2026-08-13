@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"sort"
 	"time"
 )
@@ -15,6 +16,7 @@ const (
 )
 
 type GoogleJob struct {
+	ID      string          `json:"-"`
 	UserID  string          `json:"userId"`
 	TaskID  string          `json:"taskId,omitempty"`
 	Action  GoogleJobAction `json:"action"`
@@ -26,9 +28,9 @@ type GoogleConflictRecord struct {
 	Message string `json:"message"`
 }
 type GoogleImportCandidate struct {
-	GoogleTaskListID string `json:"googleTaskListId"`
-	GoogleTaskID     string `json:"googleTaskId"`
-	Snapshot         []byte `json:"snapshot"`
+	GoogleTaskListID string          `json:"googleTaskListId"`
+	GoogleTaskID     string          `json:"googleTaskId"`
+	Snapshot         json.RawMessage `json:"snapshot"`
 }
 
 type GoogleFailureAction string

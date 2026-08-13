@@ -38,10 +38,10 @@ func TestPostgresTaskGetDerivesParentAndCompletionGuards(t *testing.T) {
 	mock.ExpectQuery("WITH RECURSIVE descendants").WithArgs("task-1", "user-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "user_id", "genre_id", "task_type_id", "parent_task_id", "title", "body",
-			"status", "leaf_progress", "start_at", "end_at", "is_all_day", "manual_priority", "version", "has_children",
+			"status", "leaf_progress", "start_at", "end_at", "is_all_day", "manual_priority", "version", "created_at", "has_children",
 			"incomplete_descendants", "unresolved_confirmations",
 		}).AddRow("task-1", "user-1", "genre-1", nil, nil, "Task", nil,
-			"IN_PROGRESS", nil, nil, nil, true, nil, 4, true, 2, 1))
+			"IN_PROGRESS", nil, nil, nil, true, nil, 4, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), true, 2, 1))
 
 	got, err := NewPostgres(database, &fixedIDs{}).Get(context.Background(), "user-1", "task-1")
 	if err != nil {
@@ -61,7 +61,7 @@ func TestPostgresTaskUpdateIsAtomicAndClearsParentProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close() })
-	repository := NewPostgres(database, &fixedIDs{values: []string{"status-history"}})
+	repository := NewPostgres(database, &fixedIDs{values: []string{"status-history", "google-job"}})
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(taskForUpdateSQL)).WithArgs("task-1", "user-1").
@@ -71,6 +71,9 @@ func TestPostgresTaskUpdateIsAtomicAndClearsParentProgress(t *testing.T) {
 	mock.ExpectExec("INSERT INTO task_status_histories").
 		WithArgs("status-history", "user-1", "task-1", domain.NotStarted, domain.InProgress, "user-1", "WEB").
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO google_sync_jobs").
+		WithArgs("google-job", "user-1", "task-1", domain.GoogleSyncTask).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	progress := 95
@@ -194,6 +197,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 		rootTaskID     = "01890f3e-4c00-7000-8000-000000000111"
 		previewChildID = "01890f3e-4c00-7000-8000-000000000112"
 		childTaskID    = "01890f3e-4c00-7000-8000-000000000113"
+		outboxID       = "01890f3e-4c00-7000-8000-000000000114"
 	)
 	if _, err := database.Exec(`INSERT INTO users (id, google_subject, email) VALUES
 		($1, 'repo-user', 'repo@example.com'), ($2, 'other-user', 'other@example.com')`, userID, otherUserID); err != nil {
@@ -214,7 +218,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repository := NewPostgres(database, &fixedIDs{values: []string{historyID}})
+	repository := NewPostgres(database, &fixedIDs{values: []string{historyID, outboxID}})
 	loaded, err := repository.Get(context.Background(), userID, parentID)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +318,13 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	if err := relations.AddDependency(context.Background(), otherUserID, parentID, childID, 1); !errors.Is(err, domain.ErrGraphTaskNotFound) {
 		t.Fatalf("cross-user graph access: %v", err)
 	}
-	creator := NewPostgres(database, &fixedIDs{values: []string{rootTaskID, previewChildID, childTaskID}})
+	creator := NewPostgres(database, &fixedIDs{values: []string{
+		rootTaskID, outboxID,
+		previewChildID,
+		childTaskID, outboxID,
+		outboxID,
+		outboxID, outboxID,
+	}})
 	rootTask, err := (application.Tasks{Repo: creator}).Create(context.Background(), userID, domain.TaskDraft{
 		GenreID: genreID, Title: "New root", IsAllDay: true,
 	}, domain.TaskCreateAuthorization{})

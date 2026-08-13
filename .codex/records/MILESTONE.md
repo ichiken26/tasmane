@@ -1,4 +1,5 @@
 # Milestones
 
-- 2026-08-12: Go module, shared Domain/Application vertical slice, security boundary, strict verification, and executable regression tests.
-- Next: fresh PostgreSQL migration integration, remaining domain graph rules, adapters, Warp-inspired Nuxt frontend based on `/home/ichiken/DESIGN.md`, Google queue lifecycle, and AI advice.
+- Completed: domain policies, transactional PostgreSQL repositories, chi API, Google lifecycle foundations, MCP server, Warp-inspired live-data Nuxt UI, and scheduled Gemini advice generation.
+- In progress: final production-path audit, impact protocol hardening, dashboard scoring/advice projection, Google worker/runtime wiring, security review, operational documentation, and full release verification.
+- Completed 2026-08-13: final production-path audit, impact protocol hardening, dashboard scoring/advice projection, Google worker/runtime wiring, Cloudflare OAuth gateway, security review, operational documentation, full verification, and fresh PostgreSQL release gates.

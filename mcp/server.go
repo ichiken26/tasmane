@@ -67,7 +67,13 @@ func Tools() ([]Tool, error) {
 		properties := map[string]any{}
 		required := []string{}
 		if item.InputRef != "" {
-			properties = map[string]any{"title": map[string]any{"type": "string", "minLength": 1}, "genreId": map[string]any{"type": "string", "format": "uuid"}}
+			properties = map[string]any{
+				"title": map[string]any{"type": "string", "minLength": 1}, "genreId": map[string]any{"type": "string", "format": "uuid"},
+				"body": map[string]any{"type": []string{"string", "null"}}, "taskTypeId": map[string]any{"type": []string{"string", "null"}, "format": "uuid"},
+				"parentTaskId": map[string]any{"type": []string{"string", "null"}, "format": "uuid"}, "startAt": map[string]any{"type": []string{"string", "null"}, "format": "date-time"},
+				"endAt": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "isAllDay": map[string]any{"type": "boolean"},
+				"manualPriority": map[string]any{"type": []string{"string", "null"}, "enum": []string{"LOW", "MEDIUM", "HIGH"}}, "impactToken": map[string]any{"type": []string{"string", "null"}},
+			}
 			required = []string{"title", "genreId"}
 		} else {
 			for name, kind := range item.Input {
@@ -97,6 +103,7 @@ type Services struct {
 	Confirmations application.Confirmations
 	Google        application.GoogleJobs
 	GoogleQueries application.GoogleQueries
+	ImpactTokens  application.ImpactTokens
 }
 type Server struct {
 	UserID   string
@@ -203,7 +210,16 @@ func (s Server) call(ctx context.Context, name string, raw json.RawMessage) (any
 	case "get_task_dependencies":
 		return s.Services.Relations.ListDependencies(ctx, s.UserID, str("taskId"))
 	case "transition_task":
-		return s.Services.Tasks.Transition(ctx, s.UserID, str("taskId"), integer("expectedVersion"), domain.Status(str("toStatus")), "MCP")
+		taskID, expected, to := str("taskId"), integer("expectedVersion"), domain.Status(str("toStatus"))
+		result, plan, transitionErr := s.Services.Tasks.TransitionWithImpact(ctx, s.UserID, taskID, expected, to, "MCP", str("impactToken"), s.Services.ImpactTokens)
+		if errors.Is(transitionErr, domain.ErrImpactConfirmationRequired) {
+			token, issueErr := s.Services.ImpactTokens.Issue(application.ImpactClaims{UserID: s.UserID, Operation: application.StatusTransitionImpactOperation(plan), ResourceID: taskID, Version: expected})
+			if issueErr != nil {
+				return nil, issueErr
+			}
+			return map[string]any{"status": "confirmation_required", "impactToken": token, "affectedEntities": plan.Changes, "warnings": []string{"ステータスを戻すと関連タスクの状態も変更される場合があります。"}}, nil
+		}
+		return result, transitionErr
 	case "add_dependency":
 		return nil, s.Services.Relations.AddDependency(ctx, s.UserID, str("taskId"), str("dependsOnTaskId"), integer("expectedVersion"))
 	case "list_confirmations":
@@ -239,7 +255,7 @@ func (s Server) call(ctx context.Context, name string, raw json.RawMessage) (any
 	case "attach_genre_task_type":
 		return nil, s.Services.Catalog.AttachGenreTaskType(ctx, s.UserID, str("genreId"), str("taskTypeId"))
 	case "trigger_google_sync":
-		return nil, s.Services.Google.Enqueue(ctx, s.UserID, "", application.GooglePullUser)
+		return nil, s.Services.Google.Trigger(ctx, s.UserID)
 	case "list_google_conflicts":
 		return s.Services.GoogleQueries.Conflicts(ctx, s.UserID)
 	case "list_google_import_candidates":
@@ -266,11 +282,45 @@ func (s Server) call(ctx context.Context, name string, raw json.RawMessage) (any
 			return nil, e
 		}
 		var patch struct {
-			Title *string `json:"title"`
+			Title          *string          `json:"title"`
+			Body           *string          `json:"body"`
+			GenreID        *string          `json:"genreId"`
+			TaskTypeID     *string          `json:"taskTypeId"`
+			ParentTaskID   *string          `json:"parentTaskId"`
+			StartAt        *time.Time       `json:"startAt"`
+			EndAt          *time.Time       `json:"endAt"`
+			IsAllDay       *bool            `json:"isAllDay"`
+			ManualPriority *domain.Priority `json:"manualPriority"`
 		}
-		_ = json.Unmarshal(a["patch"], &patch)
+		if err := json.Unmarshal(a["patch"], &patch); err != nil {
+			return nil, domain.ErrInvalidTaskInput
+		}
 		if patch.Title != nil {
 			current.Title = *patch.Title
+		}
+		if patch.Body != nil {
+			current.Body = patch.Body
+		}
+		if patch.GenreID != nil {
+			current.GenreID = *patch.GenreID
+		}
+		if patch.TaskTypeID != nil {
+			current.TaskTypeID = patch.TaskTypeID
+		}
+		if patch.ParentTaskID != nil {
+			current.ParentTaskID = patch.ParentTaskID
+		}
+		if patch.StartAt != nil {
+			current.StartAt = patch.StartAt
+		}
+		if patch.EndAt != nil {
+			current.EndAt = patch.EndAt
+		}
+		if patch.IsAllDay != nil {
+			current.IsAllDay = *patch.IsAllDay
+		}
+		if patch.ManualPriority != nil {
+			current.ManualPriority = patch.ManualPriority
 		}
 		return s.Services.Tasks.Update(ctx, s.UserID, domain.TaskUpdate{Task: current}, integer("expectedVersion"))
 	case "get_dashboard":

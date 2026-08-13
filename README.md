@@ -11,13 +11,49 @@ export TASMANE_GO_ROOT=/absolute/path/to/go1.22.12
 export PATH="$TASMANE_GO_ROOT/bin:$PATH"
 export TASMANE_GO_BIN="$TASMANE_GO_ROOT/bin/go"
 export GOFLAGS=-buildvcs=false
-export TASMANE_INTERNAL_BINDING_SECRET='development-only-secret'
+export DATABASE_URL='postgres://...'
+export TASMANE_INTERNAL_BINDING_SECRET='at-least-32-random-bytes-here'
+export TASMANE_IMPACT_TOKEN_SECRET='a-different-at-least-32-byte-secret'
+export TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY='base64-of-exactly-32-random-bytes'
 bash scripts/bootstrap.sh
 bash scripts/verify.sh
 "$TASMANE_GO_BIN" run ./cmd/api
 ```
 
+Google Tasks同期workerはAPIとは別processで常駐させる。OAuth callbackを担当するWorkerは取得したrefresh tokenを内部bootstrapへ渡し、Go APIが同じAES-256-GCM鍵で暗号化して`google_integrations.encrypted_refresh_token`へ保存する。APIは標準Base64、workerはraw 32 byteまたはBase64表現を受け付ける。平文tokenをDB・ログ・Browserへ出さない。
+
+```bash
+export DATABASE_URL='postgres://...'
+export GOOGLE_OAUTH_CLIENT_ID='...apps.googleusercontent.com'
+export GOOGLE_OAUTH_CLIENT_SECRET='...'
+export TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY='32-byte-secret-or-base64'
+"$TASMANE_GO_BIN" run ./cmd/google-worker
+```
+
+workerはPostgreSQLのdurable queueを`FOR UPDATE SKIP LOCKED`でleaseし、429/5xxを指数backoff、401/403をtoken refresh後に再試行する。ユーザー単位同期lock、専用`Tasmane` Task List、field snapshot conflict、Google-only import candidateをDBへ永続化する。`POST /v1/google/sync`は同期をqueueへ投入して202、既に同期中なら409を返す。
+
 Frontend開発は`npm run dev`、本番相当ビルドは`npm run build`。`verify.sh`はFrontendのtest/lint/typecheck/buildとGoのformat/vet/test/buildを一工程でも省略せず実行する。
+
+### Cloudflare Worker認証Gateway
+
+Nuxt/Nitro Workerが唯一の公開入口となり、Google Authorization Code + PKCEでログインする。OAuth transactionと7日間のlogin sessionはAES-GCMで暗号化・改ざん検知した`HttpOnly; Secure; SameSite=Lax; Path=/`の`__Host-` Cookieへ保存され、Google tokenや内部Binding secretをBrowserへ返さない。`POST /auth/logout`は同一Originのみ受理する。
+
+Worker Secretとして次を設定する（値を`wrangler.jsonc`やGitへ書かない）。
+
+```bash
+npx wrangler secret put NUXT_GOOGLE_CLIENT_ID
+npx wrangler secret put NUXT_GOOGLE_CLIENT_SECRET
+npx wrangler secret put NUXT_GOOGLE_REDIRECT_URI
+npx wrangler secret put NUXT_SESSION_SECRET
+npx wrangler secret put NUXT_INTERNAL_BINDING_SECRET
+```
+
+- `NUXT_GOOGLE_REDIRECT_URI`: Google Consoleへ完全一致で登録した`https://tasmane.kokage-studio.com/auth/callback`
+- `NUXT_SESSION_SECRET`: 32文字以上の独立したrandom secret
+- `NUXT_INTERNAL_BINDING_SECRET`: 32文字以上でGo側`TASMANE_INTERNAL_BINDING_SECRET`と同一
+- `TASMANE_API`: `wrangler.jsonc`で定義する非公開Go APIへのCloudflare Service Binding。local開発だけは`NUXT_API_INTERNAL_URL=http://127.0.0.1:8080`へfallbackする
+
+Browserの`/v1/**` requestはsession認証後にWorkerがBindingへ転送する。その際、client由来の全`X-Tasmane-*`およびforwarding headerを除去し、検証済みuser UUIDと内部Binding secretだけを注入する。OAuth callbackは検証済みGoogle subject/profileとrefresh tokenを内部専用`POST /internal/auth/bootstrap`へ送り、Go側でuserをupsertしrefresh tokenをAES-256-GCM暗号化してNeonへ保存する。
 
 APIは `127.0.0.1:8080` のみで待受ける。Cloudflare Worker Bindingから `X-Tasmane-Internal-Binding` と、OAuth検証後の `X-Tasmane-Authenticated-User` を注入する。BrowserからGoコンテナを直接公開しない。クライアント指定の `userId` は拒否される。
 

@@ -12,7 +12,7 @@ import (
 
 const taskReadColumns = `task.id, task.user_id, task.genre_id, task.task_type_id,
   task.parent_task_id, task.title, task.body, task.status, task.leaf_progress,
-  task.start_at, task.end_at, task.is_all_day, task.manual_priority, task.version,
+  task.start_at, task.end_at, task.is_all_day, task.manual_priority, task.version, task.created_at,
   EXISTS (SELECT 1 FROM tasks child WHERE child.parent_task_id=task.id
           AND child.user_id=task.user_id AND child.deleted_at IS NULL) AS has_children`
 
@@ -100,7 +100,7 @@ func scanTaskRows(rows *sql.Rows) ([]domain.Task, error) {
 		var startAt, endAt sql.NullTime
 		if err := rows.Scan(&task.ID, &task.UserID, &task.GenreID, &taskTypeID, &parentTaskID,
 			&task.Title, &body, &status, &progress, &startAt, &endAt, &task.IsAllDay,
-			&priority, &task.Version, &task.HasChildren); err != nil {
+			&priority, &task.Version, &task.CreatedAt, &task.HasChildren); err != nil {
 			return nil, fmt.Errorf("scan task read model: %w", err)
 		}
 		task.Status = domain.Status(status)

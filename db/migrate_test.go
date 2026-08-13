@@ -97,6 +97,12 @@ func TestMigrateAppliesPendingMigrationTransactionally(t *testing.T) {
 	mock.ExpectExec("CREATE UNIQUE INDEX uq_ai_advices_source").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0006_advice_source_dedup.sql").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0007_google_job_leases.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("ALTER TABLE google_sync_jobs").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0007_google_job_leases.sql").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	if err := Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +144,10 @@ func TestMigrateSkipsRecordedMigration(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0006_advice_source_dedup.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0007_google_job_leases.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectCommit()
 	if err := Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
@@ -281,7 +291,7 @@ func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 		t.Fatalf("third idempotent run: %v", err)
 	}
 	var count int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil || count != 6 {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil || count != 7 {
 		t.Fatalf("migration history count=%d err=%v", count, err)
 	}
 	if _, err := database.Exec(`INSERT INTO users (id, google_subject, email) VALUES ('01890f3e-4c00-7000-8000-000000000001','one','one@example.com')`); err != nil {

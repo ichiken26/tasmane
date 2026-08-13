@@ -94,6 +94,9 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 		task.Title, task.Body, task.Status, task.StartAt, task.EndAt, task.IsAllDay, task.ManualPriority); err != nil {
 		return domain.Task{}, fmt.Errorf("insert task: %w", err)
 	}
+	if err := p.enqueueGoogleTaskTx(ctx, tx, userID, task.ID, domain.GoogleSyncTask); err != nil {
+		return domain.Task{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Task{}, fmt.Errorf("commit task create: %w", err)
 	}

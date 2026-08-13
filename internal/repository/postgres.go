@@ -36,7 +36,7 @@ const taskGetSQL = `WITH RECURSIVE descendants AS (
 )
 SELECT t.id, t.user_id, t.genre_id, t.task_type_id, t.parent_task_id,
        t.title, t.body, t.status, t.leaf_progress, t.start_at, t.end_at,
-       t.is_all_day, t.manual_priority, t.version,
+       t.is_all_day, t.manual_priority, t.version, t.created_at,
        EXISTS (
          SELECT 1 FROM tasks child
          WHERE child.parent_task_id = t.id AND child.user_id = t.user_id AND child.deleted_at IS NULL
@@ -60,7 +60,7 @@ func (p *Postgres) Get(ctx context.Context, userID, taskID string) (domain.Task,
 	err := p.database.QueryRowContext(ctx, taskGetSQL, taskID, userID).Scan(
 		&task.ID, &task.UserID, &task.GenreID, &taskTypeID, &parentTaskID,
 		&task.Title, &body, &status, &progress, &startAt, &endAt,
-		&task.IsAllDay, &manualPriority, &task.Version, &task.HasChildren,
+		&task.IsAllDay, &manualPriority, &task.Version, &task.CreatedAt, &task.HasChildren,
 		&task.IncompleteDescendants, &task.UnresolvedConfirmations,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -155,6 +155,11 @@ func (p *Postgres) UpdateStatus(ctx context.Context, task domain.Task, expected 
 	}
 	if !sameNullableProgress(currentProgress, task.Progress) {
 		if err := p.insertProgressHistory(ctx, tx, task, currentProgress, via); err != nil {
+			return domain.Task{}, err
+		}
+	}
+	if via != "GOOGLE_TASKS" {
+		if err := p.enqueueGoogleTaskTx(ctx, tx, task.UserID, task.ID, domain.GoogleSyncTask); err != nil {
 			return domain.Task{}, err
 		}
 	}

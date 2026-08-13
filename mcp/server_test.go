@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"tasmane/internal/application"
 	"tasmane/internal/domain"
@@ -33,3 +34,28 @@ func TestToolsExposeNoDeleteAndGetUsesSharedTaskUseCase(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+func TestTransitionToolReturnsConfirmationRequiredWithoutMutating(t *testing.T) {
+	store := repository.NewMemory(domain.Task{ID: "t", UserID: "u", Status: domain.Completed, Progress: mcpInt(100), Version: 1})
+	server := Server{UserID: "u", Services: Services{
+		Tasks:        application.Tasks{Repo: store},
+		ImpactTokens: application.ImpactTokens{Secret: []byte("01234567890123456789012345678901")},
+	}}
+	got, err := server.call(context.Background(), "transition_task", []byte(`{"taskId":"t","toStatus":"IN_PROGRESS","expectedVersion":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	impact, ok := got.(map[string]any)
+	if !ok || impact["status"] != "confirmation_required" || impact["impactToken"] == "" {
+		t.Fatalf("unexpected impact: %#v", got)
+	}
+	if store.Tasks["t"].Status != domain.Completed {
+		t.Fatal("MCP auto-approved rollback")
+	}
+	_, err = server.call(context.Background(), "transition_task", []byte(`{"taskId":"t","toStatus":"IN_PROGRESS","expectedVersion":1,"impactToken":"invalid"}`))
+	if !errors.Is(err, application.ErrInvalidImpactToken) {
+		t.Fatalf("invalid token: %v", err)
+	}
+}
+
+func mcpInt(value int) *int { return &value }

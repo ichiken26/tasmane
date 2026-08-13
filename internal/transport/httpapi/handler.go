@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,11 +22,15 @@ type Handler struct {
 	Relations     application.Relations
 	Confirmations application.Confirmations
 	ImpactTokens  application.ImpactTokens
+	Advices       application.Advices
+	GoogleJobs    application.GoogleJobs
+	GoogleQueries application.GoogleQueries
 }
 
 type transitionRequest struct {
 	ToStatus        domain.Status `json:"toStatus"`
 	ExpectedVersion int64         `json:"expectedVersion"`
+	ImpactToken     *string       `json:"impactToken,omitempty"`
 	UserID          string        `json:"userId,omitempty"`
 }
 
@@ -62,6 +68,9 @@ func NewRouter(handler Handler) http.Handler {
 	router.Delete("/v1/task-types/{taskTypeId}", handler.deleteTaskType)
 	router.Get("/v1/dashboard", handler.getDashboard)
 	router.Get("/v1/dashboard/genres/{genreId}", handler.getGenreDashboard)
+	router.Post("/v1/google/sync", handler.triggerGoogleSync)
+	router.Get("/v1/google/conflicts", handler.listGoogleConflicts)
+	router.Get("/v1/google/import-candidates", handler.listGoogleImportCandidates)
 	router.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	})
@@ -72,7 +81,14 @@ func NewRouter(handler Handler) http.Handler {
 }
 
 type dashboardResponse struct {
-	Tasks []taskResponse `json:"tasks"`
+	Tasks         []taskResponse                  `json:"tasks"`
+	Confirmations []dashboardConfirmationResponse `json:"confirmations"`
+	Advice        *adviceResponse                 `json:"advice"`
+}
+
+type adviceResponse struct {
+	Content     string    `json:"content"`
+	GeneratedAt time.Time `json:"generatedAt"`
 }
 
 func (h Handler) getDashboard(w http.ResponseWriter, r *http.Request) { h.writeDashboard(w, r, nil) }
@@ -82,12 +98,55 @@ func (h Handler) getGenreDashboard(w http.ResponseWriter, r *http.Request) {
 }
 func (h Handler) writeDashboard(w http.ResponseWriter, r *http.Request, genres []string) {
 	userID, _ := UserID(r.Context())
+	now := time.Now().UTC()
 	tasks, err := h.Tasks.Search(r.Context(), userID, domain.TaskSearch{GenreIDs: genres})
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, dashboardResponse{Tasks: projectTaskResponses(tasks, time.Now().UTC())})
+	_, dependencies, err := h.Relations.Snapshot(r.Context(), userID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	confirmations := make(map[string][]domain.Confirmation, len(tasks))
+	for _, task := range tasks {
+		values, listErr := h.Confirmations.List(r.Context(), userID, task.ID)
+		if listErr != nil {
+			writeDomainError(w, listErr)
+			return
+		}
+		confirmations[task.ID] = values
+	}
+	projected, err := projectDashboardResponses(tasks, dependencies, confirmations, now)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	titles := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		titles[task.ID] = task.Title
+	}
+	recommendedConfirmations, err := projectDashboardConfirmations(projected, confirmations, titles, now)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	var genreID *string
+	if len(genres) == 1 {
+		genreID = &genres[0]
+	}
+	var advice *adviceResponse
+	if h.Advices.Repo != nil {
+		current, adviceErr := h.Advices.Current(r.Context(), userID, genreID)
+		if adviceErr == nil {
+			advice = &adviceResponse{Content: current.Content, GeneratedAt: current.GeneratedAt}
+		} else if !errors.Is(adviceErr, domain.ErrForbidden) {
+			writeDomainError(w, adviceErr)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, dashboardResponse{Tasks: projected, Confirmations: recommendedConfirmations, Advice: advice})
 }
 
 type dependencyRequest struct {
@@ -400,7 +459,33 @@ func (h Handler) transitionTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	output, err := h.Tasks.Transition(r.Context(), userID, chi.URLParam(r, "taskId"), input.ExpectedVersion, input.ToStatus, "WEB")
+	taskID := chi.URLParam(r, "taskId")
+	impactToken := ""
+	if input.ImpactToken != nil {
+		impactToken = *input.ImpactToken
+	}
+	output, plan, err := h.Tasks.TransitionWithImpact(r.Context(), userID, taskID, input.ExpectedVersion, input.ToStatus, "WEB", impactToken, h.ImpactTokens)
+	if errors.Is(err, domain.ErrImpactConfirmationRequired) {
+		claims := application.ImpactClaims{UserID: userID, Operation: application.StatusTransitionImpactOperation(plan), ResourceID: taskID, Version: input.ExpectedVersion}
+		token, issueErr := h.ImpactTokens.Issue(claims)
+		if issueErr != nil {
+			writeDomainError(w, issueErr)
+			return
+		}
+		entities := make([]impactEntityResponse, 0, len(plan.Changes))
+		for _, change := range plan.Changes {
+			reason := "STATUS_ROLLBACK"
+			if change.TaskID != taskID && change.ToStatus == domain.InProgress {
+				reason = "ANCESTOR_REOPEN"
+			}
+			if change.TaskID != taskID && change.ToStatus == domain.NotStarted {
+				reason = "DESCENDANT_RESET"
+			}
+			entities = append(entities, impactEntityResponse{ID: change.TaskID, Type: "TASK", Reason: stringPointer(reason)})
+		}
+		writeJSON(w, http.StatusConflict, impactPlanResponse{Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token, AffectedEntities: entities, Warnings: []string{"ステータスを戻すと関連タスクの状態も変更される場合があります。"}})
+		return
+	}
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -409,22 +494,25 @@ func (h Handler) transitionTask(w http.ResponseWriter, r *http.Request) {
 }
 
 type taskResponse struct {
-	ID                string           `json:"id"`
-	GenreID           string           `json:"genreId"`
-	TaskTypeID        *string          `json:"taskTypeId"`
-	ParentTaskID      *string          `json:"parentTaskId"`
-	Title             string           `json:"title"`
-	Body              *string          `json:"body"`
-	Status            domain.Status    `json:"status"`
-	Progress          *int             `json:"progress"`
-	StartAt           *time.Time       `json:"startAt"`
-	EndAt             *time.Time       `json:"endAt"`
-	IsAllDay          bool             `json:"isAllDay"`
-	ManualPriority    *domain.Priority `json:"manualPriority"`
-	EffectivePriority domain.Priority  `json:"effectivePriority"`
-	IsOverdue         bool             `json:"isOverdue"`
-	ShowFire          bool             `json:"showFire"`
-	Version           int64            `json:"version"`
+	ID                    string           `json:"id"`
+	GenreID               string           `json:"genreId"`
+	TaskTypeID            *string          `json:"taskTypeId"`
+	ParentTaskID          *string          `json:"parentTaskId"`
+	Title                 string           `json:"title"`
+	Body                  *string          `json:"body"`
+	Status                domain.Status    `json:"status"`
+	Progress              *int             `json:"progress"`
+	StartAt               *time.Time       `json:"startAt"`
+	EndAt                 *time.Time       `json:"endAt"`
+	IsAllDay              bool             `json:"isAllDay"`
+	ManualPriority        *domain.Priority `json:"manualPriority"`
+	EffectivePriority     domain.Priority  `json:"effectivePriority"`
+	IsOverdue             bool             `json:"isOverdue"`
+	ShowFire              bool             `json:"showFire"`
+	Version               int64            `json:"version"`
+	TaskScore             *int             `json:"taskScore,omitempty"`
+	RecommendationReasons []string         `json:"recommendationReasons,omitempty"`
+	Recommended           bool             `json:"recommended"`
 }
 
 func toTaskResponse(task domain.Task, now time.Time) taskResponse {
@@ -601,17 +689,38 @@ type createTaskRequest struct {
 }
 
 type patchTaskRequest struct {
-	ExpectedVersion int64            `json:"expectedVersion"`
-	Title           *string          `json:"title"`
-	Body            *string          `json:"body"`
-	GenreID         *string          `json:"genreId"`
-	TaskTypeID      *string          `json:"taskTypeId"`
-	ParentTaskID    *string          `json:"parentTaskId"`
-	StartAt         *time.Time       `json:"startAt"`
-	EndAt           *time.Time       `json:"endAt"`
-	IsAllDay        *bool            `json:"isAllDay"`
-	ManualPriority  *domain.Priority `json:"manualPriority"`
-	ImpactToken     *string          `json:"impactToken"`
+	ExpectedVersion int64                       `json:"expectedVersion"`
+	Title           patchField[string]          `json:"title"`
+	Body            patchField[string]          `json:"body"`
+	GenreID         patchField[string]          `json:"genreId"`
+	TaskTypeID      patchField[string]          `json:"taskTypeId"`
+	ParentTaskID    patchField[string]          `json:"parentTaskId"`
+	StartAt         patchField[time.Time]       `json:"startAt"`
+	EndAt           patchField[time.Time]       `json:"endAt"`
+	IsAllDay        patchField[bool]            `json:"isAllDay"`
+	ManualPriority  patchField[domain.Priority] `json:"manualPriority"`
+	ImpactToken     *string                     `json:"impactToken"`
+}
+
+// patchField distinguishes an omitted property from an explicit JSON null.
+// This is required for nullable Task fields such as parentTaskId and endAt.
+type patchField[T any] struct {
+	Set   bool
+	Value *T
+}
+
+func (field *patchField[T]) UnmarshalJSON(data []byte) error {
+	field.Set = true
+	if string(data) == "null" {
+		field.Value = nil
+		return nil
+	}
+	var value T
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	field.Value = &value
+	return nil
 }
 
 func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
@@ -632,32 +741,44 @@ func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := current
-	if input.Title != nil {
-		next.Title = *input.Title
+	if input.Title.Set {
+		if input.Title.Value == nil {
+			writeError(w, 400, "INVALID_REQUEST", "title cannot be null")
+			return
+		}
+		next.Title = *input.Title.Value
 	}
-	if input.Body != nil {
-		next.Body = input.Body
+	if input.Body.Set {
+		next.Body = input.Body.Value
 	}
-	if input.GenreID != nil {
-		next.GenreID = *input.GenreID
+	if input.GenreID.Set {
+		if input.GenreID.Value == nil {
+			writeError(w, 400, "INVALID_REQUEST", "genreId cannot be null")
+			return
+		}
+		next.GenreID = *input.GenreID.Value
 	}
-	if input.TaskTypeID != nil {
-		next.TaskTypeID = input.TaskTypeID
+	if input.TaskTypeID.Set {
+		next.TaskTypeID = input.TaskTypeID.Value
 	}
-	if input.ParentTaskID != nil {
-		next.ParentTaskID = input.ParentTaskID
+	if input.ParentTaskID.Set {
+		next.ParentTaskID = input.ParentTaskID.Value
 	}
-	if input.StartAt != nil {
-		next.StartAt = input.StartAt
+	if input.StartAt.Set {
+		next.StartAt = input.StartAt.Value
 	}
-	if input.EndAt != nil {
-		next.EndAt = input.EndAt
+	if input.EndAt.Set {
+		next.EndAt = input.EndAt.Value
 	}
-	if input.IsAllDay != nil {
-		next.IsAllDay = *input.IsAllDay
+	if input.IsAllDay.Set {
+		if input.IsAllDay.Value == nil {
+			writeError(w, 400, "INVALID_REQUEST", "isAllDay cannot be null")
+			return
+		}
+		next.IsAllDay = *input.IsAllDay.Value
 	}
-	if input.ManualPriority != nil {
-		next.ManualPriority = input.ManualPriority
+	if input.ManualPriority.Set {
+		next.ManualPriority = input.ManualPriority.Value
 	}
 	tree, err := h.Tasks.Tree(r.Context(), userID, taskID)
 	if err != nil {
@@ -677,36 +798,102 @@ func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	needsImpact := false
+	needsDateImpact := false
 	for _, change := range changes {
 		if change.TaskID != taskID {
-			needsImpact = true
+			needsDateImpact = true
 		}
 	}
-	claims := application.ImpactClaims{UserID: userID, Operation: "UPDATE_TASK_DATES", ResourceID: taskID, Version: current.Version}
+	genreChanged := next.GenreID != current.GenreID
+	movePlan := domain.GenreMovePlan{}
+	if genreChanged {
+		if h.Relations.Repo == nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "relation repository unavailable")
+			return
+		}
+		graphTasks, dependencies, snapshotErr := h.Relations.Snapshot(r.Context(), userID)
+		if snapshotErr != nil {
+			writeDomainError(w, snapshotErr)
+			return
+		}
+		movePlan, err = domain.PlanGenreMove(graphTasks, dependencies, taskID, next.GenreID)
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+	}
+	needsImpact := needsDateImpact || genreChanged
+	operation, operationErr := taskUpdateImpactOperation(next.GenreID, movePlan, changes, genreChanged, needsDateImpact)
+	if operationErr != nil {
+		writeDomainError(w, operationErr)
+		return
+	}
+	claims := application.ImpactClaims{UserID: userID, Operation: operation, ResourceID: taskID, Version: current.Version}
 	if needsImpact && input.ImpactToken == nil {
 		token, issueErr := h.ImpactTokens.Issue(claims)
 		if issueErr != nil {
 			writeDomainError(w, issueErr)
 			return
 		}
-		entities := make([]impactEntityResponse, 0, len(changes))
-		for _, change := range changes {
-			entities = append(entities, impactEntityResponse{ID: change.TaskID, Type: "TASK", Reason: stringPointer("DATE_PROPAGATION")})
+		entities := make([]impactEntityResponse, 0, len(changes)+len(movePlan.MovedTaskIDs)+len(movePlan.RemovedDependencies))
+		if needsDateImpact {
+			for _, change := range changes {
+				entities = append(entities, impactEntityResponse{ID: change.TaskID, Type: "TASK", Reason: stringPointer("DATE_PROPAGATION")})
+			}
 		}
-		writeJSON(w, 409, impactPlanResponse{Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token, AffectedEntities: entities, Warnings: []string{"日付変更により関連タスクの日付も変更されます。"}})
+		if genreChanged {
+			for _, id := range movePlan.MovedTaskIDs {
+				entities = append(entities, impactEntityResponse{ID: id, Type: "TASK", Reason: stringPointer("GENRE_MOVE")})
+			}
+			for _, dependency := range movePlan.RemovedDependencies {
+				id := dependency.TaskID + "->" + dependency.DependsOnTaskID
+				entities = append(entities, impactEntityResponse{ID: id, Type: "DEPENDENCY", Reason: stringPointer("GENRE_BOUNDARY_REMOVAL")})
+			}
+		}
+		warnings := []string{}
+		if needsDateImpact {
+			warnings = append(warnings, "日付変更により関連タスクの日付も変更されます。")
+		}
+		if genreChanged {
+			warnings = append(warnings, "Genre移動により境界を跨ぐ依存関係が解除されます。")
+		}
+		writeJSON(w, 409, impactPlanResponse{Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token, AffectedEntities: entities, Warnings: warnings})
 		return
 	}
 	if needsImpact && h.ImpactTokens.Verify(*input.ImpactToken, claims) != nil {
 		writeError(w, 409, "IMPACT_TOKEN_INVALID", "impact token is invalid or stale")
 		return
 	}
-	updated, err := h.Tasks.Update(r.Context(), userID, domain.TaskUpdate{Task: next, DateChanges: changes}, input.ExpectedVersion)
+	update := domain.TaskUpdate{Task: next, DateChanges: changes}
+	if genreChanged {
+		update.ApprovedGenreMove = &movePlan
+	}
+	updated, err := h.Tasks.Update(r.Context(), userID, update, input.ExpectedVersion)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
 	writeJSON(w, 200, toTaskResponse(updated, time.Now().UTC()))
+}
+
+func taskUpdateImpactOperation(genreID string, move domain.GenreMovePlan, dates []domain.DateChange, includeMove, includeDates bool) (string, error) {
+	payload := struct {
+		GenreID string               `json:"genreId,omitempty"`
+		Move    domain.GenreMovePlan `json:"move,omitempty"`
+		Dates   []domain.DateChange  `json:"dates,omitempty"`
+	}{GenreID: genreID}
+	if includeMove {
+		payload.Move = move
+	}
+	if includeDates {
+		payload.Dates = dates
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return "UPDATE_TASK_IMPACT:" + hex.EncodeToString(digest[:]), nil
 }
 
 func (h Handler) createTask(w http.ResponseWriter, r *http.Request) {
@@ -811,6 +998,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrGraphOwnership), errors.Is(err, domain.ErrGraphGenre):
 		status, code = http.StatusConflict, "CONFLICT"
 	case errors.Is(err, application.ErrInvalidImpactToken):
+		status, code = http.StatusConflict, "IMPACT_TOKEN_INVALID"
+	case errors.Is(err, domain.ErrImpactPlanChanged):
 		status, code = http.StatusConflict, "IMPACT_TOKEN_INVALID"
 	}
 	writeError(w, status, code, err.Error())

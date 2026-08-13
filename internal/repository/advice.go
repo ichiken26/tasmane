@@ -24,6 +24,22 @@ func (p *Postgres) FindAdvice(ctx context.Context, userID string, genreID *strin
 	}
 	return a, nil
 }
+
+func (p *Postgres) LatestAdvice(ctx context.Context, userID string, genreID *string) (domain.Advice, error) {
+	var advice domain.Advice
+	var genre sql.NullString
+	err := p.database.QueryRowContext(ctx, `SELECT id,user_id,genre_id,content,source_hash,generated_at,expires_at FROM ai_advices WHERE user_id=$1 AND genre_id IS NOT DISTINCT FROM $2 AND expires_at>now() ORDER BY generated_at DESC LIMIT 1`, userID, genreID).Scan(&advice.ID, &advice.UserID, &genre, &advice.Content, &advice.SourceHash, &advice.GeneratedAt, &advice.ExpiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return advice, domain.ErrForbidden
+	}
+	if err != nil {
+		return advice, fmt.Errorf("get latest advice: %w", err)
+	}
+	if genre.Valid {
+		advice.GenreID = &genre.String
+	}
+	return advice, nil
+}
 func (p *Postgres) SaveAdvice(ctx context.Context, a domain.Advice) (domain.Advice, error) {
 	id, err := p.ids.New()
 	if err != nil {

@@ -51,6 +51,11 @@ func (p *Postgres) DeleteTask(ctx context.Context, userID, taskID string, expect
 	if count != int64(len(plan.TaskIDs)) {
 		return domain.TaskDeletionPlan{}, domain.ErrVersionConflict
 	}
+	for _, deletedTaskID := range plan.TaskIDs {
+		if err := p.enqueueGoogleTaskTx(ctx, tx, userID, deletedTaskID, domain.GoogleDeleteTask); err != nil {
+			return domain.TaskDeletionPlan{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.TaskDeletionPlan{}, fmt.Errorf("commit task delete: %w", err)
 	}

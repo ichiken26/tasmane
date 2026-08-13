@@ -17,6 +17,20 @@ type RelationRepository interface {
 
 type Relations struct{ Repo RelationRepository }
 
+func (u Relations) Snapshot(ctx context.Context, userID string) ([]domain.GraphTask, []domain.Dependency, error) {
+	if userID == "" {
+		return nil, nil, domain.ErrForbidden
+	}
+	tasks, dependencies, err := u.Repo.LoadGraph(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := validateGraphOwner(tasks, userID); err != nil {
+		return nil, nil, err
+	}
+	return tasks, dependencies, nil
+}
+
 func (u Relations) AssignParent(ctx context.Context, userID, taskID, parentID string) error {
 	if userID == "" {
 		return domain.ErrForbidden

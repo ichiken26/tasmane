@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 )
 
@@ -11,7 +12,9 @@ const userKey contextKey = "authenticated-user"
 
 func InternalAuth(bindingSecret string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if bindingSecret == "" || r.Header.Get("X-Tasmane-Internal-Binding") != bindingSecret || r.Header.Get("X-Tasmane-Authenticated-User") == "" {
+		providedSecret := r.Header.Get("X-Tasmane-Internal-Binding")
+		secretMatches := bindingSecret != "" && len(providedSecret) == len(bindingSecret) && subtle.ConstantTimeCompare([]byte(providedSecret), []byte(bindingSecret)) == 1
+		if !secretMatches || r.Header.Get("X-Tasmane-Authenticated-User") == "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

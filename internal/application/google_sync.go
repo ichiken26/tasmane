@@ -20,7 +20,15 @@ type GoogleJob = domain.GoogleJob
 type GoogleQueue interface {
 	Enqueue(context.Context, GoogleJob) error
 }
+type GoogleDurableQueue interface {
+	GoogleQueue
+	Claim(context.Context, string, time.Time, time.Duration) (GoogleJob, bool, error)
+	Ack(context.Context, string, string) error
+}
 type GoogleJobs struct{ Queue GoogleQueue }
+type GoogleSyncGate interface {
+	AcquireGoogleSyncLock(context.Context, string, time.Time, time.Duration) (bool, error)
+}
 type GoogleQueryRepository interface {
 	ListGoogleConflicts(context.Context, string) ([]domain.GoogleConflictRecord, error)
 	ListGoogleImportCandidates(context.Context, string) ([]domain.GoogleImportCandidate, error)
@@ -41,15 +49,40 @@ func (q GoogleQueries) ImportCandidates(ctx context.Context, userID string) ([]d
 }
 
 func (j GoogleJobs) Enqueue(ctx context.Context, userID, taskID string, action GoogleJobAction) error {
-	if userID == "" || action == "" {
+	if userID == "" || action == "" || j.Queue == nil || (action == GooglePullUser) != (taskID == "") {
 		return domain.ErrForbidden
 	}
 	return j.Queue.Enqueue(ctx, GoogleJob{UserID: userID, TaskID: taskID, Action: action})
 }
 
+func (j GoogleJobs) Trigger(ctx context.Context, userID string) error {
+	if userID == "" {
+		return domain.ErrForbidden
+	}
+	gate, ok := j.Queue.(GoogleSyncGate)
+	if !ok {
+		return errors.New("google sync gate unavailable")
+	}
+	acquired, err := gate.AcquireGoogleSyncLock(ctx, userID, time.Now().UTC(), 2*time.Minute)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return domain.ErrConflict
+	}
+	if err := j.Enqueue(ctx, userID, "", GooglePullUser); err != nil {
+		if store, ok := j.Queue.(GoogleSyncStore); ok {
+			_ = store.MarkFailed(ctx, GoogleJob{UserID: userID, Action: GooglePullUser}, err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
 type GoogleAPIError struct {
-	Status int
-	Err    error
+	Status         int
+	Err            error
+	DomainConflict bool
 }
 
 func (e GoogleAPIError) Error() string {
@@ -89,7 +122,7 @@ func (c GoogleConsumer) Consume(ctx context.Context, job GoogleJob) error {
 	if !errors.As(err, &apiErr) {
 		return c.Store.MarkFailed(ctx, job, err.Error())
 	}
-	action := domain.ClassifyGoogleFailure(apiErr.Status, false)
+	action := domain.ClassifyGoogleFailure(apiErr.Status, apiErr.DomainConflict)
 	if action == domain.GoogleRefreshAndRetry {
 		if refreshErr := c.Client.Refresh(ctx, job.UserID); refreshErr != nil {
 			return c.Store.MarkFailed(ctx, job, refreshErr.Error())

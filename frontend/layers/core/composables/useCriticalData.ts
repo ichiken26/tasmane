@@ -8,9 +8,13 @@ export function useCriticalData<T>(key: string, critical: () => Promise<T>, pref
   return state
 }
 
-export interface ApiTask { id: string; genreId: string; title: string; body: string | null; status: string; progress: number | null; startAt?: string | null; endAt?: string | null; effectivePriority: string; isOverdue: boolean; showFire: boolean; version: number }
+export interface ApiTask { id: string; genreId: string; taskTypeId?: string | null; parentTaskId?: string | null; title: string; body: string | null; status: string; progress: number | null; startAt?: string | null; endAt?: string | null; isAllDay: boolean; manualPriority?: string | null; effectivePriority: string; isOverdue: boolean; showFire: boolean; version: number; taskScore?: number; recommendationReasons?: string[]; recommended?: boolean }
 export interface ApiGenre { id: string; name: string }
 export interface ApiDependency { taskId: string; dependsOnTaskId: string }
+export interface ApiAdvice { content: string; generatedAt: string }
+export interface ApiConfirmation { id: string; taskId: string; taskTitle: string; content: string; targetName: string; status: string; dueAt: string | null }
+export interface ImpactPlan { code: 'IMPACT_CONFIRMATION_REQUIRED'; impactToken: string; affectedEntities: { id: string; type: string; title?: string | null; reason?: string | null }[]; warnings: string[] }
+export interface TaskInput { title: string; body?: string | null; genreId: string; taskTypeId?: string | null; parentTaskId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay: boolean; manualPriority?: string | null; impactToken?: string }
 
 export function useTasmaneApi() {
   const config = useRuntimeConfig()
@@ -19,8 +23,16 @@ export function useTasmaneApi() {
     task: (id: string) => $fetch<ApiTask>(`${baseURL}/tasks/${encodeURIComponent(id)}`),
     tree: (id: string) => $fetch<ApiTask[]>(`${baseURL}/tasks/${encodeURIComponent(id)}/tree`),
     dependencies: (id: string) => $fetch<ApiDependency[]>(`${baseURL}/tasks/${encodeURIComponent(id)}/dependencies`),
-    dashboard: (genreId?: string) => $fetch<{ tasks: ApiTask[] }>(genreId ? `${baseURL}/dashboard/genres/${encodeURIComponent(genreId)}` : `${baseURL}/dashboard`),
+    createTask: (input: TaskInput) => $fetch<ApiTask>(`${baseURL}/tasks`, { method: 'POST', body: input }),
+    updateTask: (id: string, input: Partial<TaskInput> & { expectedVersion: number }) => $fetch<ApiTask>(`${baseURL}/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
+    transitionTask: (id: string, toStatus: string, expectedVersion: number, impactToken?: string) => $fetch<ApiTask>(`${baseURL}/tasks/${encodeURIComponent(id)}/transition`, { method: 'POST', body: { toStatus, expectedVersion, ...(impactToken ? { impactToken } : {}) } }),
+    deleteTask: (id: string, expectedVersion: number, impactToken?: string) => $fetch<void>(`${baseURL}/tasks/${encodeURIComponent(id)}`, { method: 'DELETE', query: { expectedVersion, ...(impactToken ? { impactToken } : {}) } }),
+    confirmations: (id: string) => $fetch<ApiConfirmation[]>(`${baseURL}/tasks/${encodeURIComponent(id)}/confirmations`),
+    createConfirmation: (id: string, input: { content: string; targetName: string; dueAt?: string | null }) => $fetch<ApiConfirmation>(`${baseURL}/tasks/${encodeURIComponent(id)}/confirmations`, { method: 'POST', body: input }),
+    updateConfirmation: (id: string, status: string) => $fetch<ApiConfirmation>(`${baseURL}/confirmations/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status } }),
+    dashboard: (genreId?: string) => $fetch<{ tasks: ApiTask[]; confirmations: ApiConfirmation[]; advice: ApiAdvice | null }>(genreId ? `${baseURL}/dashboard/genres/${encodeURIComponent(genreId)}` : `${baseURL}/dashboard`),
     genres: () => $fetch<ApiGenre[]>(`${baseURL}/genres`),
+    taskTypes: (genreId: string) => $fetch<ApiGenre[]>(`${baseURL}/genres/${encodeURIComponent(genreId)}/task-types`),
     search: (query: Record<string, string>) => $fetch<ApiTask[]>(`${baseURL}/tasks`, { query }),
   }
 }

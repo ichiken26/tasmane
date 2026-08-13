@@ -36,4 +36,4 @@ export GOFLAGS=-buildvcs=false
   -c 'CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public'
 cd "$repo_dir"
 go test -count=1 -run TestMigrationAppliesToFreshPostgresAndEnforcesSchema -v ./db
-go test -count=1 -run TestPostgresTaskRepositoryAgainstFreshSchema -v ./internal/repository
+go test -count=1 -run 'Test(PostgresTaskRepositoryAgainstFreshSchema|PostgresStatusRollbackPropagatesWithHistoriesInOneTransaction)' -v ./internal/repository

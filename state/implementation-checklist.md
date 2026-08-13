@@ -102,8 +102,8 @@
 - [x] 30-day retention
 
 ## Phase 9 Release gates
-- [ ] all P0/P1 tests pass
-- [ ] review Critical/High = 0
-- [ ] security/user-isolation review
-- [ ] migration reproducible on fresh DB
-- [ ] README operational steps
+- [x] all P0/P1 tests pass
+- [x] review Critical/High = 0
+- [x] security/user-isolation review
+- [x] migration reproducible on fresh DB
+- [x] README operational steps

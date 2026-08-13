@@ -2,7 +2,11 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"tasmane/internal/domain"
 )
 
@@ -51,6 +55,75 @@ type TaskReadRepository interface {
 
 type Tasks struct{ Repo Repository }
 
+type StatusTransitionRepository interface {
+	PreviewStatusTransition(context.Context, string, string, int64, domain.Status) (domain.StatusTransitionPlan, error)
+	ApplyStatusTransition(context.Context, string, string, int64, domain.Status, string, domain.StatusTransitionPlan) (domain.Task, error)
+}
+
+func (u Tasks) PreviewTransition(ctx context.Context, userID, taskID string, expected int64, to domain.Status) (domain.StatusTransitionPlan, error) {
+	if userID == "" || taskID == "" || expected < 1 {
+		return domain.StatusTransitionPlan{}, domain.ErrForbidden
+	}
+	repository, ok := u.Repo.(StatusTransitionRepository)
+	if !ok {
+		return domain.StatusTransitionPlan{}, errors.New("status transition repository unavailable")
+	}
+	return repository.PreviewStatusTransition(ctx, userID, taskID, expected, to)
+}
+
+// TransitionWithImpact is the shared HTTP/MCP rollback protocol. An impact
+// token approves exactly one deterministic plan, not merely the target task.
+func (u Tasks) TransitionWithImpact(ctx context.Context, userID, taskID string, expected int64, to domain.Status, via, impactToken string, tokens ImpactTokens) (domain.Task, domain.StatusTransitionPlan, error) {
+	plan, err := u.PreviewTransition(ctx, userID, taskID, expected, to)
+	if err != nil {
+		if impactToken != "" && (errors.Is(err, domain.ErrVersionConflict) || errors.Is(err, domain.ErrInvalidTransition)) {
+			return domain.Task{}, domain.StatusTransitionPlan{}, ErrInvalidImpactToken
+		}
+		return domain.Task{}, domain.StatusTransitionPlan{}, err
+	}
+	if plan.RequiresConfirmation {
+		if impactToken == "" {
+			return domain.Task{}, plan, domain.ErrImpactConfirmationRequired
+		}
+		claims := ImpactClaims{UserID: userID, Operation: StatusTransitionImpactOperation(plan), ResourceID: taskID, Version: expected}
+		if err := tokens.Verify(impactToken, claims); err != nil {
+			return domain.Task{}, plan, err
+		}
+	}
+	repository := u.Repo.(StatusTransitionRepository)
+	result, err := repository.ApplyStatusTransition(ctx, userID, taskID, expected, to, via, plan)
+	if errors.Is(err, domain.ErrStatusImpactPlanChanged) {
+		return domain.Task{}, plan, ErrInvalidImpactToken
+	}
+	return result, plan, err
+}
+
+func StatusTransitionImpactOperation(plan domain.StatusTransitionPlan) string {
+	hash := sha256.Sum256([]byte(statusTransitionPlanCanonical(plan)))
+	return fmt.Sprintf("task-status:%s:%s", plan.ToStatus, hex.EncodeToString(hash[:]))
+}
+
+func statusTransitionPlanCanonical(plan domain.StatusTransitionPlan) string {
+	var value strings.Builder
+	fmt.Fprintf(&value, "%s|%s|%d|", plan.TaskID, plan.ToStatus, plan.ExpectedVersion)
+	for _, change := range plan.Changes {
+		fmt.Fprintf(&value, "%s:%s:%s:%d:", change.TaskID, change.FromStatus, change.ToStatus, change.ExpectedVersion)
+		if change.FromProgress == nil {
+			value.WriteString("null")
+		} else {
+			fmt.Fprintf(&value, "%d", *change.FromProgress)
+		}
+		value.WriteByte(':')
+		if change.ToProgress == nil {
+			value.WriteString("null")
+		} else {
+			fmt.Fprintf(&value, "%d", *change.ToProgress)
+		}
+		value.WriteByte('|')
+	}
+	return value.String()
+}
+
 func (u Tasks) Search(ctx context.Context, userID string, search domain.TaskSearch) ([]domain.Task, error) {
 	if userID == "" {
 		return nil, domain.ErrForbidden
@@ -93,6 +166,10 @@ func (u Tasks) Get(ctx context.Context, userID, taskID string) (domain.Task, err
 func (u Tasks) Transition(ctx context.Context, userID, taskID string, expected int64, to domain.Status, via string) (domain.Task, error) {
 	if userID == "" || expected < 1 {
 		return domain.Task{}, domain.ErrForbidden
+	}
+	if _, ok := u.Repo.(StatusTransitionRepository); ok {
+		result, _, err := u.TransitionWithImpact(ctx, userID, taskID, expected, to, via, "", ImpactTokens{})
+		return result, err
 	}
 	t, err := u.Repo.Get(ctx, userID, taskID)
 	if err != nil {
