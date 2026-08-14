@@ -253,24 +253,8 @@ func (c *Client) pull(ctx context.Context, token, userID, listID string) error {
 			return err
 		}
 		for _, remote := range page.Items {
-			sync, err := c.Store.FindGoogleTaskSync(ctx, userID, listID, remote.ID)
-			if errors.Is(err, sql.ErrNoRows) {
-				snapshot, _ := json.Marshal(snapshotOf(remote))
-				if err := c.Store.SaveGoogleTaskSync(ctx, repository.GoogleTaskSync{UserID: userID, GoogleTaskListID: listID, GoogleTaskID: remote.ID, Snapshot: snapshot}); err != nil {
-					return err
-				}
-				continue
-			}
-			if err != nil {
+			if err := c.ingestRemote(ctx, userID, listID, remote); err != nil {
 				return err
-			}
-			if remote.Deleted {
-				return c.conflict(ctx, userID, sync.TaskID, "GOOGLE_DELETED", errors.New("Google task deleted; user resolution required"))
-			}
-			if sync.TaskID != "" {
-				if err := c.mergeRemote(ctx, userID, sync, remote); err != nil {
-					return err
-				}
 			}
 		}
 		if page.NextPageToken == "" {
@@ -278,6 +262,26 @@ func (c *Client) pull(ctx context.Context, token, userID, listID string) error {
 		}
 		pageToken = page.NextPageToken
 	}
+}
+
+func (c *Client) ingestRemote(ctx context.Context, userID, listID string, remote googleTask) error {
+	sync, err := c.Store.FindGoogleTaskSync(ctx, userID, listID, remote.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		snapshot, _ := json.Marshal(snapshotOf(remote))
+		return c.Store.SaveGoogleTaskSync(ctx, repository.GoogleTaskSync{
+			UserID: userID, GoogleTaskListID: listID, GoogleTaskID: remote.ID, Snapshot: snapshot,
+		})
+	}
+	if err != nil {
+		return err
+	}
+	if remote.Deleted {
+		return c.conflict(ctx, userID, sync.TaskID, "GOOGLE_DELETED", errors.New("Google task deleted; user resolution required"))
+	}
+	if sync.TaskID == "" {
+		return nil
+	}
+	return c.mergeRemote(ctx, userID, sync, remote)
 }
 
 func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository.GoogleTaskSync, remote googleTask) error {

@@ -38,6 +38,7 @@ if "google_task_list_id text" not in sql:
 
 required_ops = [
     "getGenreDashboard", "updateConfirmation", "listTaskDependencies",
+    "removeTaskDependency", "getUserSettings", "updateUserSettings",
     "listGoogleConflicts", "listGoogleImportCandidates"
 ]
 for op in required_ops:

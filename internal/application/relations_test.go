@@ -28,6 +28,10 @@ func (r *relationRepoStub) AddDependency(context.Context, string, domain.Depende
 	r.writes++
 	return nil
 }
+func (r *relationRepoStub) RemoveDependency(context.Context, string, domain.Dependency) error {
+	r.writes++
+	return nil
+}
 
 func TestRelationsValidateBeforePersistence(t *testing.T) {
 	tasks := []domain.GraphTask{
@@ -68,8 +72,28 @@ func TestRelationsRejectRepositoryGraphOutsideAuthenticatedOwner(t *testing.T) {
 	if err := u.AddDependency(context.Background(), "authenticated", "a", "b", 1); !errors.Is(err, domain.ErrGraphOwnership) {
 		t.Fatalf("AddDependency error = %v", err)
 	}
+	if err := u.RemoveDependency(context.Background(), "authenticated", "a", "b"); !errors.Is(err, domain.ErrGraphOwnership) {
+		t.Fatalf("RemoveDependency error = %v", err)
+	}
 	if r.writes != 0 {
 		t.Fatalf("foreign graph writes = %d", r.writes)
+	}
+}
+
+func TestRelationsRemoveDependencyRequiresExistingEdge(t *testing.T) {
+	r := &relationRepoStub{
+		tasks: []domain.GraphTask{{ID: "a", UserID: "u", GenreID: "g"}, {ID: "b", UserID: "u", GenreID: "g"}},
+		edges: []domain.Dependency{{TaskID: "a", DependsOnTaskID: "b"}},
+	}
+	u := Relations{Repo: r}
+	if err := u.RemoveDependency(context.Background(), "u", "a", "missing"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("missing edge error = %v", err)
+	}
+	if err := u.RemoveDependency(context.Background(), "u", "a", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if r.writes != 1 {
+		t.Fatalf("writes=%d", r.writes)
 	}
 }
 

@@ -8,8 +8,11 @@
     "directory": ".output/public",
     "binding": "ASSETS"
   },
+  // Public hostname is attached in the Cloudflare dashboard (or via routes below).
+  // "routes": [{ "pattern": "tasmane.kokage-studio.com/*", "zone_name": "kokage-studio.com" }],
   "services": [
     {
+      // Must resolve to the private Go API Worker/Tunnel service in the same account.
       "binding": "TASMANE_API",
       "service": "tasmane-api"
     }

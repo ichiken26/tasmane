@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { FetchError } from 'ofetch'
 import { onMounted, reactive, ref, watch } from 'vue'
 import type { ApiTask, ImpactPlan, TaskInput } from '../../core/composables/useCriticalData'
 import { useTasmaneApi } from '../../core/composables/useCriticalData'
+import { impactLines, impactPlanFrom } from '../../core/composables/impact'
 
 const props = defineProps<{ task?: ApiTask }>()
 const emit = defineEmits<{ saved: [task: ApiTask] }>()
@@ -50,12 +50,9 @@ function requestBody(token?: string): TaskInput {
     isAllDay: form.isAllDay, ...(token ? { impactToken: token } : {}),
   }
 }
-function impactFrom(error: unknown): ImpactPlan | undefined {
-  const data = (error as FetchError<ImpactPlan>)?.data
-  return data?.code === 'IMPACT_CONFIRMATION_REQUIRED' ? data : undefined
-}
 async function save(token?: string) {
-  busy.value = true; errorMessage.value = ''
+  busy.value = true
+  errorMessage.value = ''
   try {
     const body = requestBody(token)
     const saved = props.task
@@ -65,10 +62,12 @@ async function save(token?: string) {
     emit('saved', saved)
     if (!props.task) await router.push(`/tasks/${saved.id}`)
   } catch (error) {
-    const plan = impactFrom(error)
+    const plan = impactPlanFrom(error)
     if (plan) impact.value = plan
     else errorMessage.value = '保存できませんでした。入力内容または最新versionを確認してください。'
-  } finally { busy.value = false }
+  } finally {
+    busy.value = false
+  }
 }
 </script>
 
@@ -87,6 +86,6 @@ async function save(token?: string) {
       <label><span>終日</span><input v-model="form.isAllDay" type="checkbox" /></label>
     </div>
     <button class="primary" type="submit" :disabled="busy">{{ busy ? '保存中…' : task ? '変更を保存' : 'タスクを作成' }}</button>
-    <ImpactModal :open="Boolean(impact)" title="変更の影響を確認" :impacts="[...(impact?.warnings || []), ...(impact?.affectedEntities.map(item => `${item.title || item.id}: ${item.reason || item.type}`) || [])]" @cancel="impact=undefined" @confirm="impact && save(impact.impactToken)" />
+    <ImpactModal :open="Boolean(impact)" title="変更の影響を確認" :impacts="impactLines(impact)" @cancel="impact=undefined" @confirm="impact && save(impact.impactToken)" />
   </form>
 </template>

@@ -14,6 +14,17 @@ function base64UrlToBytes(value: string): Uint8Array {
   return Uint8Array.from(binary, character => character.charCodeAt(0))
 }
 
+function decodeCanonicalBase64Url(value: string): Uint8Array | null {
+  if (!value || /[^A-Za-z0-9_-]/u.test(value)) return null
+  try {
+    const bytes = base64UrlToBytes(value)
+    if (bytesToBase64Url(bytes) !== value) return null
+    return bytes
+  } catch {
+    return null
+  }
+}
+
 function exactBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer as ArrayBuffer
 }
@@ -36,13 +47,14 @@ export async function unseal<T>(value: string, secret: string): Promise<T | null
   try {
     const [version, encodedIV, encodedCiphertext, extra] = value.split('.')
     if (version !== 'v1' || !encodedIV || !encodedCiphertext || extra) return null
-    const iv = base64UrlToBytes(encodedIV)
-    if (iv.length !== 12) return null
+    const iv = decodeCanonicalBase64Url(encodedIV)
+    const ciphertext = decodeCanonicalBase64Url(encodedCiphertext)
+    if (!iv || !ciphertext || iv.length !== 12) return null
     const key = await encryptionKey(secret)
     const plaintext = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: exactBuffer(iv) },
       key,
-      exactBuffer(base64UrlToBytes(encodedCiphertext)),
+      exactBuffer(ciphertext),
     )
     return JSON.parse(decoder.decode(plaintext)) as T
   } catch {

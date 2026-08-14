@@ -76,6 +76,9 @@ func (*updateImpactRelationRepo) SetParent(context.Context, string, string, stri
 func (*updateImpactRelationRepo) AddDependency(context.Context, string, domain.Dependency, int64) error {
 	return nil
 }
+func (*updateImpactRelationRepo) RemoveDependency(context.Context, string, domain.Dependency) error {
+	return nil
+}
 
 func TestTaskGenreMoveRequiresBoundImpactTokenAndListsCompleteImpact(t *testing.T) {
 	parent := "outside"

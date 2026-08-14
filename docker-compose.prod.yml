@@ -1,0 +1,75 @@
+# Private Go runtime stack. Keep this network unreachable from the public Internet.
+# The Cloudflare Worker is the only public ingress and must reach the API via Tunnel/Binding.
+
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      TASMANE_INTERNAL_BINDING_SECRET: ${TASMANE_INTERNAL_BINDING_SECRET}
+      TASMANE_IMPACT_TOKEN_SECRET: ${TASMANE_IMPACT_TOKEN_SECRET}
+      TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY: ${TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY}
+      # Containers / Tunnel peers need a non-loopback bind.
+      TASMANE_HTTP_ADDR: ${TASMANE_HTTP_ADDR:-0.0.0.0:8080}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  google-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: google-worker
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY: ${TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  advice-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: advice-scheduler
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cleanup
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    profiles: ["ops"]
+    restart: "no"

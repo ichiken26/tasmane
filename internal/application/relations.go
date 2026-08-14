@@ -13,6 +13,7 @@ type RelationRepository interface {
 	ListTaskDependencies(context.Context, string, string) ([]domain.Dependency, error)
 	SetParent(context.Context, string, string, string) error
 	AddDependency(context.Context, string, domain.Dependency, int64) error
+	RemoveDependency(context.Context, string, domain.Dependency) error
 }
 
 type Relations struct{ Repo RelationRepository }
@@ -70,6 +71,30 @@ func (u Relations) ListDependencies(ctx context.Context, userID, taskID string) 
 		return nil, domain.ErrForbidden
 	}
 	return u.Repo.ListTaskDependencies(ctx, userID, taskID)
+}
+
+func (u Relations) RemoveDependency(ctx context.Context, userID, taskID, dependsOnTaskID string) error {
+	if userID == "" || taskID == "" || dependsOnTaskID == "" {
+		return domain.ErrForbidden
+	}
+	tasks, dependencies, err := u.Repo.LoadGraph(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if err := validateGraphOwner(tasks, userID); err != nil {
+		return err
+	}
+	found := false
+	for _, edge := range dependencies {
+		if edge.TaskID == taskID && edge.DependsOnTaskID == dependsOnTaskID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return domain.ErrForbidden
+	}
+	return u.Repo.RemoveDependency(ctx, userID, domain.Dependency{TaskID: taskID, DependsOnTaskID: dependsOnTaskID})
 }
 
 func validateGraphOwner(tasks []domain.GraphTask, userID string) error {

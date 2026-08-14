@@ -85,12 +85,26 @@ Dockerやsystem-wide installなしのfresh PostgreSQL検証は `./scripts/test-p
 ## 想定構成
 
 - Frontend: Nuxt / Cloudflare Workers
-- API: Go + chi / Cloudflare Containers
+- API: Go + chi（非公開。Tunnel または Cloudflare Containers）
 - DB: Neon PostgreSQL
-- Queue: Cloudflare Queues
-- AI: Gemini API
+- Queue: PostgreSQL durable queue（Google同期。Cloudflare Queues schemaは将来互換用）
+- AI: Gemini API（`cmd/advice-scheduler`）
 - Root: `https://tasmane.kokage-studio.com`
-- API: `https://tasmane.kokage-studio.com/api/*`
+- API: `https://tasmane.kokage-studio.com/api/v1/*`（互換で `/v1/*` も可）
+
+## 本番リリース
+
+手順の正本は [`docs/PRODUCTION.md`](docs/PRODUCTION.md)。
+
+最短コマンド:
+
+```bash
+cp .env.example .env   # 値を埋める
+bash scripts/gen-secrets.sh
+bash scripts/deploy-go.sh
+bash scripts/deploy-worker.sh
+# 日次: bash scripts/run-cleanup.sh
+```
 
 ## 使い方
 

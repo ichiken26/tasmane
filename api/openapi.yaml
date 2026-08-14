@@ -217,6 +217,56 @@ paths:
           description: Added
         '409':
           description: Cycle/genre conflict
+  /v1/tasks/{taskId}/dependencies/{dependsOnTaskId}:
+    delete:
+      operationId: removeTaskDependency
+      description: Human Web UI/API only. Never expose as MCP/WebMCP tool.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      - in: path
+        name: dependsOnTaskId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: expectedVersion
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '204':
+          description: Removed
+        '409':
+          description: Version conflict
+  /v1/settings:
+    get:
+      operationId: getUserSettings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+    patch:
+      operationId: updateUserSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSettings'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '400':
+          description: Invalid timezone or interval
   /v1/tasks/{taskId}/confirmations:
     get:
       operationId: listConfirmations
@@ -676,6 +726,19 @@ components:
           - string
           - 'null'
           format: date-time
+    UserSettings:
+      type: object
+      required:
+      - timezone
+      - googleSyncIntervalMinutes
+      properties:
+        timezone:
+          type: string
+          description: IANA timezone, e.g. Asia/Tokyo
+        googleSyncIntervalMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
     Error:
       type: object
       required:

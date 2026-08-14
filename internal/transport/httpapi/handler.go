@@ -21,6 +21,7 @@ type Handler struct {
 	Catalog       application.Catalog
 	Relations     application.Relations
 	Confirmations application.Confirmations
+	Settings      application.Settings
 	ImpactTokens  application.ImpactTokens
 	Advices       application.Advices
 	GoogleJobs    application.GoogleJobs
@@ -51,6 +52,9 @@ func NewRouter(handler Handler) http.Handler {
 	router.Get("/v1/tasks/{taskId}/tree", handler.getTaskTree)
 	router.Get("/v1/tasks/{taskId}/dependencies", handler.listDependencies)
 	router.Post("/v1/tasks/{taskId}/dependencies", handler.addDependency)
+	router.Delete("/v1/tasks/{taskId}/dependencies/{dependsOnTaskId}", handler.removeDependency)
+	router.Get("/v1/settings", handler.getSettings)
+	router.Patch("/v1/settings", handler.updateSettings)
 	router.Get("/v1/tasks/{taskId}/confirmations", handler.listConfirmations)
 	router.Post("/v1/tasks/{taskId}/confirmations", handler.createConfirmation)
 	router.Patch("/v1/confirmations/{confirmationId}", handler.updateConfirmation)
@@ -185,6 +189,80 @@ func (h Handler) addDependency(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (h Handler) removeDependency(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	expectedVersion, err := strconv.ParseInt(r.URL.Query().Get("expectedVersion"), 10, 64)
+	if err != nil || expectedVersion < 1 {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	taskID := chi.URLParam(r, "taskId")
+	current, err := h.Tasks.Get(r.Context(), userID, taskID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if current.Version != expectedVersion {
+		writeDomainError(w, domain.ErrVersionConflict)
+		return
+	}
+	if err := h.Relations.RemoveDependency(r.Context(), userID, taskID, chi.URLParam(r, "dependsOnTaskId")); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type settingsResponse struct {
+	Timezone                  string `json:"timezone"`
+	GoogleSyncIntervalMinutes int    `json:"googleSyncIntervalMinutes"`
+}
+
+type patchSettingsRequest struct {
+	Timezone                  *string `json:"timezone"`
+	GoogleSyncIntervalMinutes *int    `json:"googleSyncIntervalMinutes"`
+}
+
+func (h Handler) getSettings(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	settings, err := h.Settings.Get(r.Context(), userID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsResponse{
+		Timezone: settings.Timezone, GoogleSyncIntervalMinutes: settings.GoogleSyncIntervalMinutes,
+	})
+}
+
+func (h Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserID(r.Context())
+	current, err := h.Settings.Get(r.Context(), userID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	var input patchSettingsRequest
+	if decodeJSON(w, r, &input) != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	if input.Timezone != nil {
+		current.Timezone = *input.Timezone
+	}
+	if input.GoogleSyncIntervalMinutes != nil {
+		current.GoogleSyncIntervalMinutes = *input.GoogleSyncIntervalMinutes
+	}
+	saved, err := h.Settings.Update(r.Context(), userID, current)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsResponse{
+		Timezone: saved.Timezone, GoogleSyncIntervalMinutes: saved.GoogleSyncIntervalMinutes,
+	})
 }
 
 type createConfirmationRequest struct {
@@ -740,84 +818,32 @@ func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, domain.ErrVersionConflict)
 		return
 	}
-	next := current
-	if input.Title.Set {
-		if input.Title.Value == nil {
-			writeError(w, 400, "INVALID_REQUEST", "title cannot be null")
-			return
-		}
-		next.Title = *input.Title.Value
-	}
-	if input.Body.Set {
-		next.Body = input.Body.Value
-	}
-	if input.GenreID.Set {
-		if input.GenreID.Value == nil {
-			writeError(w, 400, "INVALID_REQUEST", "genreId cannot be null")
-			return
-		}
-		next.GenreID = *input.GenreID.Value
-	}
-	if input.TaskTypeID.Set {
-		next.TaskTypeID = input.TaskTypeID.Value
-	}
-	if input.ParentTaskID.Set {
-		next.ParentTaskID = input.ParentTaskID.Value
-	}
-	if input.StartAt.Set {
-		next.StartAt = input.StartAt.Value
-	}
-	if input.EndAt.Set {
-		next.EndAt = input.EndAt.Value
-	}
-	if input.IsAllDay.Set {
-		if input.IsAllDay.Value == nil {
-			writeError(w, 400, "INVALID_REQUEST", "isAllDay cannot be null")
-			return
-		}
-		next.IsAllDay = *input.IsAllDay.Value
-	}
-	if input.ManualPriority.Set {
-		next.ManualPriority = input.ManualPriority.Value
+	next, err := applyTaskPatch(current, input)
+	if err != nil {
+		writeBadRequest(w, err)
+		return
 	}
 	tree, err := h.Tasks.Tree(r.Context(), userID, taskID)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
-	dateTasks := make([]domain.DateTask, 0, len(tree))
-	for _, task := range tree {
-		parent := ""
-		if task.ParentTaskID != nil {
-			parent = *task.ParentTaskID
-		}
-		dateTasks = append(dateTasks, domain.DateTask{ID: task.ID, ParentID: parent, StartAt: task.StartAt, EndAt: task.EndAt})
-	}
-	changes, err := domain.PlanDateChange(dateTasks, taskID, next.StartAt, next.EndAt)
+	changes, err := domain.PlanDateChange(toDateTasks(tree), taskID, next.StartAt, next.EndAt)
 	if err != nil {
 		writeDomainError(w, err)
 		return
 	}
-	needsDateImpact := false
-	for _, change := range changes {
-		if change.TaskID != taskID {
-			needsDateImpact = true
-		}
-	}
+	needsDateImpact := dateImpactRequired(taskID, changes)
 	genreChanged := next.GenreID != current.GenreID
 	movePlan := domain.GenreMovePlan{}
 	if genreChanged {
-		if h.Relations.Repo == nil {
-			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "relation repository unavailable")
-			return
-		}
-		graphTasks, dependencies, snapshotErr := h.Relations.Snapshot(r.Context(), userID)
-		if snapshotErr != nil {
-			writeDomainError(w, snapshotErr)
-			return
-		}
-		movePlan, err = domain.PlanGenreMove(graphTasks, dependencies, taskID, next.GenreID)
+		movePlan, err = h.planGenreMove(r, userID, taskID, next.GenreID)
 		if err != nil {
+			var bad badRequestError
+			if errors.As(err, &bad) {
+				writeBadRequest(w, err)
+				return
+			}
 			writeDomainError(w, err)
 			return
 		}
@@ -835,29 +861,7 @@ func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 			writeDomainError(w, issueErr)
 			return
 		}
-		entities := make([]impactEntityResponse, 0, len(changes)+len(movePlan.MovedTaskIDs)+len(movePlan.RemovedDependencies))
-		if needsDateImpact {
-			for _, change := range changes {
-				entities = append(entities, impactEntityResponse{ID: change.TaskID, Type: "TASK", Reason: stringPointer("DATE_PROPAGATION")})
-			}
-		}
-		if genreChanged {
-			for _, id := range movePlan.MovedTaskIDs {
-				entities = append(entities, impactEntityResponse{ID: id, Type: "TASK", Reason: stringPointer("GENRE_MOVE")})
-			}
-			for _, dependency := range movePlan.RemovedDependencies {
-				id := dependency.TaskID + "->" + dependency.DependsOnTaskID
-				entities = append(entities, impactEntityResponse{ID: id, Type: "DEPENDENCY", Reason: stringPointer("GENRE_BOUNDARY_REMOVAL")})
-			}
-		}
-		warnings := []string{}
-		if needsDateImpact {
-			warnings = append(warnings, "日付変更により関連タスクの日付も変更されます。")
-		}
-		if genreChanged {
-			warnings = append(warnings, "Genre移動により境界を跨ぐ依存関係が解除されます。")
-		}
-		writeJSON(w, 409, impactPlanResponse{Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token, AffectedEntities: entities, Warnings: warnings})
+		writeJSON(w, 409, buildUpdateImpactPlan(token, changes, movePlan, needsDateImpact, genreChanged))
 		return
 	}
 	if needsImpact && h.ImpactTokens.Verify(*input.ImpactToken, claims) != nil {
@@ -1001,6 +1005,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		status, code = http.StatusConflict, "IMPACT_TOKEN_INVALID"
 	case errors.Is(err, domain.ErrImpactPlanChanged):
 		status, code = http.StatusConflict, "IMPACT_TOKEN_INVALID"
+	case errors.Is(err, application.ErrInvalidSettings):
+		status, code = http.StatusBadRequest, "INVALID_REQUEST"
 	}
 	writeError(w, status, code, err.Error())
 }

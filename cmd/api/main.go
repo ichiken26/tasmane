@@ -56,16 +56,23 @@ func main() {
 		Catalog:       application.Catalog{Repo: store},
 		Relations:     application.Relations{Repo: store},
 		Confirmations: application.Confirmations{Repo: store},
+		Settings:      application.Settings{Repo: store},
 		ImpactTokens:  application.ImpactTokens{Secret: []byte(impactSecret)},
 		GoogleJobs:    application.GoogleJobs{Queue: store},
 		GoogleQueries: application.GoogleQueries{Repo: store},
 		Advices:       application.Advices{Repo: store},
 	})
 	mux := http.NewServeMux()
+	(httpapi.Health{DB: database}).Register(mux)
 	mux.Handle("/internal/auth/bootstrap", httpapi.NewAuthBootstrapHandler(database, tokenCipher, secret))
 	mux.Handle("/", httpapi.InternalAuth(secret, handler))
+
+	addr := os.Getenv("TASMANE_HTTP_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	}
 	server := &http.Server{
-		Addr:              "127.0.0.1:8080",
+		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -82,6 +89,7 @@ func main() {
 			log.Printf("shutdown: %v", err)
 		}
 	}()
+	log.Printf("listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

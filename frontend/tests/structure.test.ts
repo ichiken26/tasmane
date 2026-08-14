@@ -17,10 +17,23 @@ describe('Nuxt application contract', () => {
       expect(css).toContain(token)
   })
 
+  it('ships production ingress assets and CSP', () => {
+    expect(existsSync('docs/PRODUCTION.md')).toBe(true)
+    expect(existsSync('Dockerfile')).toBe(true)
+    expect(existsSync('docker-compose.prod.yml')).toBe(true)
+    expect(existsSync('.env.example')).toBe(true)
+    expect(existsSync('server/routes/api/v1/[...path].ts')).toBe(true)
+    expect(read('server/middleware/security.ts')).toContain('Content-Security-Policy')
+    expect(read('nuxt.config.ts')).toContain("/api/v1")
+  })
+
   it('keeps hierarchy and dependency semantics distinct and exposes warning dialogs', () => {
     expect(read('frontend/layers/task/components/HierarchyTree.vue')).toContain('Hierarchy Tree')
+    expect(read('frontend/layers/task/components/HierarchyTree.vue')).toContain('collapsed')
     expect(read('frontend/layers/task/components/DependencyGraph.vue')).toContain('Dependency Graph')
     expect(read('frontend/layers/task/components/DependencyGraph.vue')).toContain('multi-dependency')
+    expect(read('frontend/layers/task/components/DependencyGraph.vue')).toContain('removeDependency')
+    expect(read('frontend/layers/shared/components/AppSidebar.vue')).toContain('api.genres()')
     expect(read('frontend/layers/shared/components/ImpactModal.vue')).toContain('role="alertdialog"')
   })
 })

@@ -16,7 +16,7 @@ export default defineNuxtConfig({
     sessionSecret: process.env.NUXT_SESSION_SECRET,
     internalBindingSecret: process.env.NUXT_INTERNAL_BINDING_SECRET,
     apiInternalUrl: process.env.NUXT_API_INTERNAL_URL || 'http://127.0.0.1:8080',
-    public: { apiBase: process.env.NUXT_PUBLIC_API_BASE || '/v1' },
+    public: { apiBase: process.env.NUXT_PUBLIC_API_BASE || '/api/v1' },
   },
   nitro: { preset: 'cloudflare_module' },
   app: { head: { htmlAttrs: { lang: 'ja' }, meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }] } },

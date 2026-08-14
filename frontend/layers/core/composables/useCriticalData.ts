@@ -15,6 +15,9 @@ export interface ApiAdvice { content: string; generatedAt: string }
 export interface ApiConfirmation { id: string; taskId: string; taskTitle: string; content: string; targetName: string; status: string; dueAt: string | null }
 export interface ImpactPlan { code: 'IMPACT_CONFIRMATION_REQUIRED'; impactToken: string; affectedEntities: { id: string; type: string; title?: string | null; reason?: string | null }[]; warnings: string[] }
 export interface TaskInput { title: string; body?: string | null; genreId: string; taskTypeId?: string | null; parentTaskId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay: boolean; manualPriority?: string | null; impactToken?: string }
+export interface UserSettings { timezone: string; googleSyncIntervalMinutes: number }
+export interface GoogleConflict { taskId: string; code: string; message: string }
+export interface GoogleImportCandidate { googleTaskListId: string; googleTaskId: string; snapshot: unknown }
 
 export function useTasmaneApi() {
   const config = useRuntimeConfig()
@@ -23,6 +26,10 @@ export function useTasmaneApi() {
     task: (id: string) => $fetch<ApiTask>(`${baseURL}/tasks/${encodeURIComponent(id)}`),
     tree: (id: string) => $fetch<ApiTask[]>(`${baseURL}/tasks/${encodeURIComponent(id)}/tree`),
     dependencies: (id: string) => $fetch<ApiDependency[]>(`${baseURL}/tasks/${encodeURIComponent(id)}/dependencies`),
+    addDependency: (id: string, dependsOnTaskId: string, expectedVersion: number) =>
+      $fetch<void>(`${baseURL}/tasks/${encodeURIComponent(id)}/dependencies`, { method: 'POST', body: { dependsOnTaskId, expectedVersion } }),
+    removeDependency: (id: string, dependsOnTaskId: string, expectedVersion: number) =>
+      $fetch<void>(`${baseURL}/tasks/${encodeURIComponent(id)}/dependencies/${encodeURIComponent(dependsOnTaskId)}`, { method: 'DELETE', query: { expectedVersion } }),
     createTask: (input: TaskInput) => $fetch<ApiTask>(`${baseURL}/tasks`, { method: 'POST', body: input }),
     updateTask: (id: string, input: Partial<TaskInput> & { expectedVersion: number }) => $fetch<ApiTask>(`${baseURL}/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
     transitionTask: (id: string, toStatus: string, expectedVersion: number, impactToken?: string) => $fetch<ApiTask>(`${baseURL}/tasks/${encodeURIComponent(id)}/transition`, { method: 'POST', body: { toStatus, expectedVersion, ...(impactToken ? { impactToken } : {}) } }),
@@ -34,5 +41,9 @@ export function useTasmaneApi() {
     genres: () => $fetch<ApiGenre[]>(`${baseURL}/genres`),
     taskTypes: (genreId: string) => $fetch<ApiGenre[]>(`${baseURL}/genres/${encodeURIComponent(genreId)}/task-types`),
     search: (query: Record<string, string>) => $fetch<ApiTask[]>(`${baseURL}/tasks`, { query }),
+    settings: () => $fetch<UserSettings>(`${baseURL}/settings`),
+    updateSettings: (input: Partial<UserSettings>) => $fetch<UserSettings>(`${baseURL}/settings`, { method: 'PATCH', body: input }),
+    googleConflicts: () => $fetch<GoogleConflict[]>(`${baseURL}/google/conflicts`),
+    googleImportCandidates: () => $fetch<GoogleImportCandidate[]>(`${baseURL}/google/import-candidates`),
   }
 }

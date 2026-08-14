@@ -39,34 +39,56 @@ func PlanStatusTransition(target Task, ancestors, descendants []Task, to Status)
 		plan.RequiresConfirmation = true
 		// A parent rollback only changes the parent. Completed descendants and
 		// ancestors are deliberately preserved.
-		if !target.HasChildren {
-			for _, ancestor := range ancestors {
-				if ancestor.Status != Completed {
-					continue
-				}
-				reopened, transitionErr := ancestor.Transition(InProgress)
-				if transitionErr != nil {
-					return StatusTransitionPlan{}, transitionErr
-				}
-				plan.Changes = append(plan.Changes, transitionChange(ancestor, reopened))
-			}
+		if target.HasChildren {
+			return plan, nil
 		}
+		changes, transitionErr := reopenCompletedAncestors(ancestors)
+		if transitionErr != nil {
+			return StatusTransitionPlan{}, transitionErr
+		}
+		plan.Changes = append(plan.Changes, changes...)
 	case target.Status == InProgress && to == NotStarted:
 		plan.RequiresConfirmation = true
-		if target.HasChildren {
-			for _, descendant := range descendants {
-				if descendant.Status != InProgress {
-					continue
-				}
-				reset, transitionErr := descendant.Transition(NotStarted)
-				if transitionErr != nil {
-					return StatusTransitionPlan{}, transitionErr
-				}
-				plan.Changes = append(plan.Changes, transitionChange(descendant, reset))
-			}
+		if !target.HasChildren {
+			return plan, nil
 		}
+		changes, transitionErr := resetInProgressDescendants(descendants)
+		if transitionErr != nil {
+			return StatusTransitionPlan{}, transitionErr
+		}
+		plan.Changes = append(plan.Changes, changes...)
 	}
 	return plan, nil
+}
+
+func reopenCompletedAncestors(ancestors []Task) ([]StatusTransitionChange, error) {
+	changes := make([]StatusTransitionChange, 0, len(ancestors))
+	for _, ancestor := range ancestors {
+		if ancestor.Status != Completed {
+			continue
+		}
+		reopened, err := ancestor.Transition(InProgress)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, transitionChange(ancestor, reopened))
+	}
+	return changes, nil
+}
+
+func resetInProgressDescendants(descendants []Task) ([]StatusTransitionChange, error) {
+	changes := make([]StatusTransitionChange, 0, len(descendants))
+	for _, descendant := range descendants {
+		if descendant.Status != InProgress {
+			continue
+		}
+		reset, err := descendant.Transition(NotStarted)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, transitionChange(descendant, reset))
+	}
+	return changes, nil
 }
 
 func transitionChange(from, to Task) StatusTransitionChange {
