@@ -14,6 +14,7 @@
     "secrets:gen": "bash scripts/gen-secrets.sh"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
     "@nuxtjs/google-fonts": "^3.2.0",
     "nuxt": "^3.17.5",
     "vue": "^3.5.16",

@@ -39,3 +39,6 @@ FROM gcr.io/distroless/static-debian12:nonroot AS migrate
 COPY --from=build /out/migrate /app
 USER nonroot:nonroot
 ENTRYPOINT ["/app"]
+
+# Cloudflare Containers のデフォルトターゲット
+FROM api AS cloudflare-api

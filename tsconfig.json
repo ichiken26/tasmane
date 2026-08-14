@@ -3,5 +3,14 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true
-  }
+  },
+  "exclude": [
+    "cloudflare",
+    "dist",
+    ".data",
+    ".output",
+    "node_modules/runtime/server",
+    "node_modules/dist/runtime/server"
+  ]
 }
+
