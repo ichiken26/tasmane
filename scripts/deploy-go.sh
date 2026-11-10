@@ -16,9 +16,11 @@ docker compose -f docker-compose.prod.yml up -d --remove-orphans migrate api clo
 docker compose -f docker-compose.prod.yml ps
 
 # ループバックでのヘルスチェック（Tunnel 越しの疎通は Worker 側で確認）
+host_port="$(sed -n 's/^TASMANE_API_HOST_PORT=//p' .env | tail -n 1 | tr -d '"[:space:]')"
+host_port="${host_port:-8080}"
 for _ in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1; then
-    echo "Go API is ready (127.0.0.1:8080). cloudflared logs: docker compose -f docker-compose.prod.yml logs -f cloudflared"
+  if curl -fsS "http://127.0.0.1:${host_port}/readyz" >/dev/null 2>&1; then
+    echo "Go API is ready (127.0.0.1:${host_port}). cloudflared logs: docker compose -f docker-compose.prod.yml logs -f cloudflared"
     exit 0
   fi
   sleep 2

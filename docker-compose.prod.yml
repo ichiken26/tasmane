@@ -40,9 +40,10 @@ services:
       default: {}
       tunnel:
         ipv4_address: ${TASMANE_API_TUNNEL_IP:-172.29.80.10}
-    # ホストのループバックのみ（LAN・インターネットには公開しない）
+    # ホストのループバックのみ（LAN・インターネットには公開しない）。ヘルスチェック用で、Tunnel は tunnel ネットワークの固定 IP:8080 を使う
+    # ホストの 8080 を他のサービスが使っている場合は .env の TASMANE_API_HOST_PORT で変える
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${TASMANE_API_HOST_PORT:-8080}:8080"
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]

@@ -3,9 +3,11 @@
 import { bindings, defineConfig } from 'cf/config'
 
 // Tunnel 先 Go API の VPC Service ID（`cf workers-vpc services create` の結果）
-const apiVpcServiceId = process.env.TASMANE_API_VPC_SERVICE_ID
-if (!apiVpcServiceId || !/^[0-9a-f-]{36}$/u.test(apiVpcServiceId))
-  throw new Error('TASMANE_API_VPC_SERVICE_ID (Workers VPC Service ID of the home-server Go API) is required')
+// 未設定でも設定ファイル自体は読めるようにする（`cf auth login` や Tunnel 作成は ID 発行前に実行するため）。
+// デプロイでの必須チェックは scripts/deploy-worker.sh と CI が行う。
+const apiVpcServiceId = process.env.TASMANE_API_VPC_SERVICE_ID || ''
+if (apiVpcServiceId && !/^[0-9a-f-]{36}$/u.test(apiVpcServiceId))
+  throw new Error('TASMANE_API_VPC_SERVICE_ID must be a Workers VPC Service ID (UUID)')
 
 export default defineConfig({
   worker: {
@@ -22,7 +24,7 @@ export default defineConfig({
     observability: { enabled: true, headSamplingRate: 1 },
     env: {
       // 自宅サーバー Go API（Tunnel 経由・非公開）
-      TASMANE_API: bindings.vpcService({ id: apiVpcServiceId, dev: { remote: true } }),
+      ...(apiVpcServiceId ? { TASMANE_API: bindings.vpcService({ id: apiVpcServiceId, dev: { remote: true } }) } : {}),
       ASSETS: bindings.assets(),
       // Worker Secrets（値は `cf workers secrets bulk` で投入し Git に置かない）
       NUXT_GOOGLE_CLIENT_ID: bindings.secret(),

@@ -25,7 +25,8 @@ fi
 # 2. cloudflared トークン（秘密情報。画面共有・ログ保存に注意）
 mkdir -p secrets
 umask 077
-npx cf tunnels token get "$TASMANE_TUNNEL_ID" > secrets/tunnel-token.txt
+# cf は JSON 文字列（引用符付き）で出力するため、トークン本体だけを保存
+npx cf tunnels token get "$TASMANE_TUNNEL_ID" | tr -d '"[:space:]' > secrets/tunnel-token.txt
 echo "Tunnel token saved to secrets/tunnel-token.txt -> set TASMANE_TUNNEL_TOKEN in the home server .env"
 
 # 3. Workers VPC Service（Tunnel 経由で api の固定 IP:8080 へ。HTTP のみ・公開ホスト名なし）

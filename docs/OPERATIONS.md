@@ -71,7 +71,7 @@ npm run deploy:go       # = bash scripts/deploy-go.sh（ビルド→migrate→�
 確認:
 
 ```bash
-curl -sS http://127.0.0.1:8080/readyz                         # ready
+curl -sS http://127.0.0.1:8080/readyz                         # ready（TASMANE_API_HOST_PORT を変えたらそのポート）
 docker compose -f docker-compose.prod.yml logs -f cloudflared  # "Registered tunnel connection" が出ること
 ```
 
@@ -107,7 +107,7 @@ Repository → Settings → Environments に `production` を作り、Secrets �
 
 | Secret | 値 |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | Workers Scripts:Edit・Workers VPC:Bind 等を持つ API トークン |
+| `CLOUDFLARE_API_TOKEN` | Account: Workers Scripts Write／Zone: Workers Routes Write・DNS Write（`kokage-studio.com`）を持つ API トークン。Workers VPC の権限は「Connectivity Directory Bind」（ロール名。トークンの権限一覧に無い場合はトークン作成者のロールで足りる） |
 | `CLOUDFLARE_ACCOUNT_ID` | アカウント ID |
 | `TASMANE_API_VPC_SERVICE_ID` | 1.4 の service id |
 | `NUXT_GOOGLE_CLIENT_ID` / `NUXT_GOOGLE_CLIENT_SECRET` / `NUXT_GOOGLE_REDIRECT_URI` | OAuth |
@@ -208,6 +208,7 @@ OpenAPI とルータの一致は `TestRouterMatchesOpenAPIOperations`、MCP の�
 | メモ欄に「Googleでの再認証が必要」 | ログイン時の ID トークン（1 時間）が切れた。ボタンから再認証する。メモアプリ側は一度ログインすれば Firebase のセッションが続く |
 | メモ欄が「応答がありません」 | メモアプリが未デプロイ（連携非対応）か、`NUXT_PUBLIC_EMBED_PARENT_ORIGINS` にタスマネのオリジンがない |
 | Google の専用リストを消した | `/settings` に警告が出る。「専用リストを作り直す」で新しいリストへ全タスクを再作成（連携解除したタスクを除く） |
+| `deploy:go` で `Bind for 0.0.0.0:8080 failed: port is already allocated` | ホストの 8080 を他のコンテナ等が使っている。`.env` に `TASMANE_API_HOST_PORT=18080` などを設定して再実行（Tunnel 側の設定は変更不要） |
 | DB 障害 | Neon の状態確認。Go は再接続するため復旧後に `docker compose restart api` |
 
 ## 8. 切り戻し
