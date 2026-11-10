@@ -50,6 +50,18 @@ export function clearAuthSession(event: H3Event): void {
   deleteCookie(event, SESSION_COOKIE, cookieBase)
 }
 
+// 有効なセッション Cookie の読み取り（無効・期限切れは null）
+export async function readValidSession(cookie: string | undefined, secret: string, now = Math.floor(Date.now() / 1000)): Promise<SessionIdentity | null> {
+  if (!cookie) return null
+  const session = await unseal<SessionIdentity>(cookie, secret)
+  return session && session.userId && session.expiresAt > now ? session : null
+}
+
+// リクエストのログイン済みセッション（任意）
+export async function currentSession(event: H3Event, secret: string): Promise<SessionIdentity | null> {
+  return readValidSession(getCookie(event, SESSION_COOKIE), secret)
+}
+
 // 有効セッションの必須取得
 export async function requireSession(event: H3Event, secret: string): Promise<SessionIdentity> {
   const cookie = getCookie(event, SESSION_COOKIE)

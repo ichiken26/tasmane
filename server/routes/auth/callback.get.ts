@@ -1,5 +1,5 @@
 import { createError, defineEventHandler, getQuery, getRequestURL, sendRedirect, setResponseHeader } from 'h3'
-import { setSession, takeOAuthTransaction } from '../../utils/auth'
+import { currentSession, safeReturnTo, setSession, takeOAuthTransaction } from '../../utils/auth'
 import { authConfig } from '../../utils/config'
 import { verifyGoogleIDToken } from '../../utils/oauth'
 import { memoHandoffExpiry } from '../../utils/oauth'
@@ -22,10 +22,15 @@ export default defineEventHandler(async (event) => {
   const config = authConfig(useRuntimeConfig(event))
   const query = getQuery(event)
   const transaction = await takeOAuthTransaction(event, config.sessionSecret)
+  // 既にログイン済み（同じコールバックの再読込・重複リクエスト・別タブで完了済み）ならエラーにせず元の画面へ
+  const alreadySignedIn = async () => (await currentSession(event, config.sessionSecret)) !== null
+  const returnToOrHome = () => safeReturnTo(transaction?.returnTo)
   // state/code とトランザクションの突合
   if (!transaction || typeof query.state !== 'string' || query.state !== transaction.state
-    || typeof query.code !== 'string' || query.error)
+    || typeof query.code !== 'string' || query.error) {
+    if (await alreadySignedIn()) return sendRedirect(event, returnToOrHome(), 303)
     throw createError({ statusCode: 401, statusMessage: 'OAuth callback validation failed' })
+  }
 
   const redirectUri = config.googleRedirectUri || new URL('/auth/callback', getRequestURL(event)).toString()
   // 認可コードのトークン交換
@@ -45,6 +50,8 @@ export default defineEventHandler(async (event) => {
   if (!tokenResponse.ok || tokens.error || !tokens.id_token) {
     // 原因調査用（トークンや個人情報は出さない）
     console.error('auth callback: Google token exchange failed', { status: tokenResponse.status, error: tokens.error ?? null, hasIdToken: Boolean(tokens.id_token) })
+    // 認可コードの二重使用（invalid_grant）でも、先のリクエストでログインできていれば成功扱い
+    if (await alreadySignedIn()) return sendRedirect(event, returnToOrHome(), 303)
     throw createError({ statusCode: 502, statusMessage: 'Google token exchange failed' })
   }
   // ID トークン検証と内部ブートストラップ

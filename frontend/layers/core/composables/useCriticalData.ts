@@ -1,3 +1,4 @@
+import { shouldRedirectToLogin } from './loginRedirect'
 import { onMounted } from 'vue'
 import { useAsyncData, useRequestFetch, useRuntimeConfig } from '#app'
 import { schedulePrefetch } from './criticalOrder'
@@ -45,7 +46,7 @@ export function useTasmaneApi() {
       if (import.meta.client && response.ok && options.method && options.method !== 'GET') globalThis.dispatchEvent(new globalThis.Event(DATA_CHANGED_EVENT))
     },
     onResponseError({ response }) {
-      if (import.meta.client && response.status === 401 && !globalThis.location.pathname.startsWith('/auth/'))
+      if (import.meta.client && response.status === 401 && shouldRedirectToLogin({ prerendering: Boolean((globalThis.document as { prerendering?: boolean } | undefined)?.prerendering), pathname: globalThis.location.pathname }))
         globalThis.location.assign(`/auth/login?returnTo=${enc(globalThis.location.pathname + globalThis.location.search)}`)
     },
   }) as Promise<T>

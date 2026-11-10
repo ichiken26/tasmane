@@ -1,5 +1,5 @@
 import { defineEventHandler, getQuery, getRequestURL, sendRedirect, setResponseHeader } from 'h3'
-import { setOAuthTransaction, safeReturnTo } from '../../utils/auth'
+import { currentSession, setOAuthTransaction, safeReturnTo } from '../../utils/auth'
 import { authConfig } from '../../utils/config'
 import { randomBase64Url, sha256Base64Url, sha256Hex } from '../../utils/security'
 
@@ -12,6 +12,8 @@ export default defineEventHandler(async (event) => {
   const nonce = randomBase64Url()
   const verifier = randomBase64Url(64)
   const returnTo = safeReturnTo(getQuery(event).returnTo)
+  // ログイン済みなら新しいトランザクションを作らない（同時に開かれたログインが進行中のトランザクションを上書きしないように）
+  if (await currentSession(event, config.sessionSecret)) return sendRedirect(event, returnTo, 302)
   // OAuth トランザクション Cookie の発行
   await setOAuthTransaction(event, { state, nonce, verifier, returnTo, expiresAt: now + 600 }, config.sessionSecret)
 
