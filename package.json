@@ -13,7 +13,8 @@
     "ops:cleanup": "bash scripts/run-cleanup.sh",
     "secrets:gen": "bash scripts/gen-secrets.sh",
     "build:cf": "bash scripts/cf-build.sh",
-    "setup:cloudflare": "bash scripts/setup-cloudflare.sh"
+    "setup:cloudflare": "bash scripts/setup-cloudflare.sh",
+    "postinstall": "nuxt prepare"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.152",
