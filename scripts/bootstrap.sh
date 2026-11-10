@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ログディレクトリとスクリプト実行権限の確保
 mkdir -p state/logs
 
 chmod +x scripts/*.sh
 
+# Go 1.22 以上のツールチェーン解決
 if [[ -n "${TASMANE_GO_BIN:-}" && -x "$TASMANE_GO_BIN" ]]; then
   :
 elif command -v go >/dev/null 2>&1; then
@@ -20,9 +22,11 @@ case "$GO_VERSION" in
   *) echo "Go 1.22 or newer is required (found: ${GO_VERSION:-unknown})." >&2; exit 1 ;;
 esac
 
+# npm 依存のインストール
 command -v npm >/dev/null 2>&1 || { echo "Node.js/npm is required." >&2; exit 1; }
 npm ci
 
+# ブートストラップ完了後の次手順案内
 echo "Tasmane harness bootstrapped."
 echo "Next:"
 echo "  export TASMANE_GO_BIN='$TASMANE_GO_BIN'"

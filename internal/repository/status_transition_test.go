@@ -15,6 +15,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// 状態ロールバックと履歴の同一トランザクション検証
 func TestPostgresStatusRollbackPropagatesWithHistoriesInOneTransaction(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -29,6 +30,7 @@ func TestPostgresStatusRollbackPropagatesWithHistoriesInOneTransaction(t *testin
 	if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(schema) {
 		t.Fatal("unsafe schema")
 	}
+	// テストスキーマの作成
 	if _, err = admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +52,7 @@ func TestPostgresStatusRollbackPropagatesWithHistoriesInOneTransaction(t *testin
 		parentID = "01890f3e-4c00-7000-8000-000000000203"
 		leafID   = "01890f3e-4c00-7000-8000-000000000204"
 	)
+	// フィクスチャの挿入
 	if _, err = database.Exec(`INSERT INTO users(id,google_subject,email) VALUES($1,'status-user','status@example.com')`, userID); err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +80,7 @@ func TestPostgresStatusRollbackPropagatesWithHistoriesInOneTransaction(t *testin
 	}
 	var parentStatus string
 	var parentVersion, statusHistories, progressHistories int
+	// 伝播結果のスキャン
 	if err = database.QueryRow(`SELECT status,version FROM tasks WHERE id=$1`, parentID).Scan(&parentStatus, &parentVersion); err != nil {
 		t.Fatal(err)
 	}

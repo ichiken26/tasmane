@@ -8,3 +8,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.cloudflare/
+.wrangler/
+# Cloudflare Worker / Tunnel のシークレット（cf deploy --secrets-file 用）
+secrets/*
+!secrets/worker.env.example

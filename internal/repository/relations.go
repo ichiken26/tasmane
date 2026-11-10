@@ -23,6 +23,7 @@ JOIN tasks required ON required.id=dependency.depends_on_task_id AND required.us
 WHERE dependency.user_id=$1 AND task.deleted_at IS NULL AND required.deleted_at IS NULL
 ORDER BY dependency.task_id, dependency.depends_on_task_id`
 
+// ユーザーグラフの読取
 func (p *Postgres) LoadGraph(ctx context.Context, userID string) ([]domain.GraphTask, []domain.Dependency, error) {
 	if p == nil || p.database == nil || userID == "" {
 		return nil, nil, domain.ErrForbidden
@@ -30,7 +31,9 @@ func (p *Postgres) LoadGraph(ctx context.Context, userID string) ([]domain.Graph
 	return loadGraph(ctx, p.database, userID)
 }
 
+// グラフタスクと依存の読取
 func loadGraph(ctx context.Context, querier graphQuerier, userID string) ([]domain.GraphTask, []domain.Dependency, error) {
+	// グラフタスクの取得
 	rows, err := querier.QueryContext(ctx, graphTasksSQL, userID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load graph tasks: %w", err)
@@ -38,6 +41,7 @@ func loadGraph(ctx context.Context, querier graphQuerier, userID string) ([]doma
 	tasks := []domain.GraphTask{}
 	for rows.Next() {
 		var task domain.GraphTask
+		// グラフタスク行のスキャン
 		if err := rows.Scan(&task.ID, &task.UserID, &task.GenreID, &task.ParentID); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("scan graph task: %w", err)
@@ -50,6 +54,7 @@ func loadGraph(ctx context.Context, querier graphQuerier, userID string) ([]doma
 	}
 	rows.Close()
 
+	// 依存行の取得
 	rows, err = querier.QueryContext(ctx, graphDependenciesSQL, userID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load dependencies: %w", err)
@@ -58,6 +63,7 @@ func loadGraph(ctx context.Context, querier graphQuerier, userID string) ([]doma
 	dependencies := []domain.Dependency{}
 	for rows.Next() {
 		var dependency domain.Dependency
+		// 依存行のスキャン
 		if err := rows.Scan(&dependency.TaskID, &dependency.DependsOnTaskID); err != nil {
 			return nil, nil, fmt.Errorf("scan dependency: %w", err)
 		}
@@ -69,15 +75,18 @@ func loadGraph(ctx context.Context, querier graphQuerier, userID string) ([]doma
 	return tasks, dependencies, nil
 }
 
+// 親子関係の設定
 func (p *Postgres) SetParent(ctx context.Context, userID, taskID, parentID string) error {
 	if p == nil || p.database == nil || userID == "" || taskID == "" {
 		return domain.ErrForbidden
 	}
+	// トランザクション開始
 	tx, err := p.database.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin parent assignment: %w", err)
 	}
 	defer tx.Rollback()
+	// ユーザーグラフのロック取得
 	if err := lockUserGraph(ctx, tx, userID); err != nil {
 		return err
 	}
@@ -92,6 +101,7 @@ func (p *Postgres) SetParent(ctx context.Context, userID, taskID, parentID strin
 	if parentID != "" {
 		parentValue = parentID
 	}
+	// 親ID更新の実行
 	result, err := tx.ExecContext(ctx, `UPDATE tasks SET parent_task_id=$1
     WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL`, parentValue, taskID, userID)
 	if err != nil {
@@ -104,21 +114,25 @@ func (p *Postgres) SetParent(ctx context.Context, userID, taskID, parentID strin
 	if count != 1 {
 		return domain.ErrForbidden
 	}
+	// 親子付けの確定
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit parent assignment: %w", err)
 	}
 	return nil
 }
 
+// 依存関係の追加
 func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency domain.Dependency, expectedVersion int64) error {
 	if p == nil || p.database == nil || userID == "" || expectedVersion < 1 {
 		return domain.ErrForbidden
 	}
+	// トランザクション開始
 	tx, err := p.database.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin dependency addition: %w", err)
 	}
 	defer tx.Rollback()
+	// ユーザーグラフのロック取得
 	if err := lockUserGraph(ctx, tx, userID); err != nil {
 		return err
 	}
@@ -130,6 +144,7 @@ func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency 
 		return err
 	}
 	var currentVersion int64
+	// 対象行のロック取得
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM tasks
     WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE`, dependency.TaskID, userID).Scan(&currentVersion); errors.Is(err, sql.ErrNoRows) {
 		return domain.ErrForbidden
@@ -146,6 +161,7 @@ func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency 
 			break
 		}
 	}
+	// 依存行の挿入
 	result, err := tx.ExecContext(ctx, `INSERT INTO task_dependencies
     (user_id, genre_id, task_id, depends_on_task_id) VALUES ($1, $2, $3, $4)
     ON CONFLICT (task_id, depends_on_task_id) DO NOTHING`,
@@ -160,16 +176,19 @@ func (p *Postgres) AddDependency(ctx context.Context, userID string, dependency 
 	if count != 1 {
 		return domain.ErrConflict
 	}
+	// 版番号の加算
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET version=version+1
     WHERE id=$1 AND user_id=$2 AND version=$3 AND deleted_at IS NULL`, dependency.TaskID, userID, expectedVersion); err != nil {
 		return fmt.Errorf("increment dependency task version: %w", err)
 	}
+	// 依存追加の確定
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit dependency addition: %w", err)
 	}
 	return nil
 }
 
+// タスク依存の一覧
 func (p *Postgres) ListTaskDependencies(ctx context.Context, userID, taskID string) ([]domain.Dependency, error) {
 	tasks, dependencies, err := p.LoadGraph(ctx, userID)
 	if err != nil {
@@ -191,6 +210,7 @@ func (p *Postgres) ListTaskDependencies(ctx context.Context, userID, taskID stri
 	return result, nil
 }
 
+// ユーザーグラフのアドバイザリロック取得
 func lockUserGraph(ctx context.Context, tx *sql.Tx, userID string) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, userID); err != nil {
 		return fmt.Errorf("lock user graph: %w", err)
@@ -198,10 +218,12 @@ func lockUserGraph(ctx context.Context, tx *sql.Tx, userID string) error {
 	return nil
 }
 
+// 依存関係の削除
 func (p *Postgres) RemoveDependency(ctx context.Context, userID string, dependency domain.Dependency) error {
 	if p == nil || p.database == nil || userID == "" || dependency.TaskID == "" || dependency.DependsOnTaskID == "" {
 		return domain.ErrForbidden
 	}
+	// 依存行の削除
 	result, err := p.database.ExecContext(ctx, `DELETE FROM task_dependencies
     WHERE user_id=$1 AND task_id=$2 AND depends_on_task_id=$3`, userID, dependency.TaskID, dependency.DependsOnTaskID)
 	if err != nil {

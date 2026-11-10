@@ -5,12 +5,16 @@ import tempfile
 import unittest
 
 
+# リポジトリルート
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+# bootstrap.sh の前提チェック
 class BootstrapTest(unittest.TestCase):
+    # 古い Go では npm より先に失敗すること
     def test_rejects_old_go_before_npm(self):
         with tempfile.TemporaryDirectory() as directory:
+            # 偽 go / npm バイナリの用意
             bindir = pathlib.Path(directory)
             go = bindir / "go"
             npm = bindir / "npm"
@@ -24,6 +28,7 @@ class BootstrapTest(unittest.TestCase):
                 "TASMANE_GO_BIN": str(go),
                 "MARKER": str(marker),
             }
+            # 偽ツールチェーンでの bootstrap.sh 実行
             result = subprocess.run(
                 ["/bin/bash", "scripts/bootstrap.sh"], cwd=ROOT, env=env,
                 capture_output=True, text=True, check=False,

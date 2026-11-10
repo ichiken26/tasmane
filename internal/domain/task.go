@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// タスク状態の列挙
 type Status string
 
 const (
@@ -14,6 +15,7 @@ const (
 	Completed  Status = "COMPLETED"
 )
 
+// タスクドメインのエラー群
 var (
 	ErrInvalidTransition          = errors.New("invalid task transition")
 	ErrNotCompletable             = errors.New("task is not completable")
@@ -25,8 +27,10 @@ var (
 	ErrInvalidTaskInput           = errors.New("invalid task input")
 	ErrImpactConfirmationRequired = errors.New("impact confirmation required")
 	ErrImpactPlanChanged          = errors.New("impact plan changed")
+	ErrCompletedParent            = errors.New("completed task cannot receive children")
 )
 
+// タスク作成の下書き入力
 type TaskDraft struct {
 	GenreID        string
 	TaskTypeID     *string
@@ -39,11 +43,15 @@ type TaskDraft struct {
 	ManualPriority *Priority
 }
 
+// リーフから親への変換認可
 type TaskCreateAuthorization struct {
 	AllowLeafConversion bool
 	ParentVersion       int64
+	// 影響確認済みの祖先日付伝播
+	DateChanges []DateChange
 }
 
+// タスク検索条件
 type TaskSearch struct {
 	Query    string
 	GenreIDs []string
@@ -51,15 +59,19 @@ type TaskSearch struct {
 	Deadline string
 }
 
+// タスク更新と日付変更の束
 type TaskUpdate struct {
 	Task        Task
 	DateChanges []DateChange
-	// ApprovedGenreMove is set only after the caller verifies an impact token.
-	// Repositories recompute and compare it while holding the graph lock.
+	// 影響トークン検証後のジャンル移動承認
 	ApprovedGenreMove *GenreMovePlan
+	// 影響トークン検証後の付け替え先葉タスクの親化承認（承認時点の親version）
+	ApprovedLeafConversion *int64
 }
 
+// 下書きからの新規タスク生成
 func NewTask(id, userID string, draft TaskDraft) (Task, error) {
+	// 識別子と下書きの入力検証
 	if id == "" || userID == "" {
 		return Task{}, ErrInvalidTaskInput
 	}
@@ -75,6 +87,7 @@ func NewTask(id, userID string, draft TaskDraft) (Task, error) {
 	}, nil
 }
 
+// タスク下書きの入力検証
 func ValidateTaskDraft(draft *TaskDraft) error {
 	if draft == nil {
 		return ErrInvalidTaskInput
@@ -94,6 +107,7 @@ func ValidateTaskDraft(draft *TaskDraft) error {
 	return nil
 }
 
+// 優先度の列挙
 type Priority string
 
 const (
@@ -102,11 +116,13 @@ const (
 	LowPriority    Priority = "LOW"
 )
 
+// 親進捗算出用の子貢献値
 type ProgressContribution struct {
 	Progress          *int
 	EffectivePriority Priority
 }
 
+// タスクのドメイン実体
 type Task struct {
 	ID, UserID              string
 	GenreID                 string
@@ -127,16 +143,16 @@ type Task struct {
 	UnresolvedConfirmations int
 }
 
-// ForPersistence enforces the leaf_progress ownership boundary. Parent
-// progress is always derived from children and must never be written to the
-// leaf_progress column, even though transition code may carry a display value.
+// 親の派生進捗を永続化しない境界
 func (t Task) ForPersistence() Task {
+	// 親の leaf_progress 列クリア
 	if t.HasChildren {
 		t.Progress = nil
 	}
 	return t
 }
 
+// タスク状態遷移のドメイン規則
 func (t Task) Transition(to Status) (Task, error) {
 	if t.Status == NotStarted && to == InProgress {
 		v := 0
@@ -144,6 +160,7 @@ func (t Task) Transition(to Status) (Task, error) {
 		return t, nil
 	}
 	if t.Status == InProgress && to == Completed {
+		// 未完了子孫または未解決確認がある完了拒否
 		if t.IncompleteDescendants > 0 || t.UnresolvedConfirmations > 0 {
 			return Task{}, ErrNotCompletable
 		}
@@ -163,16 +180,16 @@ func (t Task) Transition(to Status) (Task, error) {
 	return Task{}, ErrInvalidTransition
 }
 
-// ParentProgress derives a parent's display progress from its direct children.
-// Integer division deliberately rounds down so an unfinished fraction is not
-// presented as completed progress.
+// 直下の子から親の表示進捗を導出
 func ParentProgress(status Status, children []ProgressContribution) (int, error) {
+	// 子の有無と完了状態の判定
 	if len(children) == 0 {
 		return 0, ErrParentNeedsChildren
 	}
 	if status == Completed {
 		return 100, nil
 	}
+	// 優先度加重の進捗集計
 	weightedProgress, totalWeight := 0, 0
 	for _, child := range children {
 		weight, ok := priorityWeight(child.EffectivePriority)
@@ -190,12 +207,14 @@ func ParentProgress(status Status, children []ProgressContribution) (int, error)
 		totalWeight += weight
 	}
 	progress := weightedProgress / totalWeight
+	// 未完了親の進捗上限適用
 	if progress > 95 {
 		return 95, nil
 	}
 	return progress, nil
 }
 
+// 優先度の加重値
 func priorityWeight(priority Priority) (int, bool) {
 	switch priority {
 	case HighPriority:
@@ -209,8 +228,7 @@ func priorityWeight(priority Priority) (int, bool) {
 	}
 }
 
-// RollbackCompletedAncestors applies the child COMPLETED -> IN_PROGRESS rule
-// to ancestors ordered from the direct parent through the root.
+// 完了祖先の進行中巻き戻し
 func RollbackCompletedAncestors(ancestors []Task) []Task {
 	result := append([]Task(nil), ancestors...)
 	for index := range result {
@@ -223,8 +241,7 @@ func RollbackCompletedAncestors(ancestors []Task) []Task {
 	return result
 }
 
-// RollbackInProgressDescendants applies a parent's IN_PROGRESS -> NOT_STARTED
-// propagation while preserving completed and already-not-started descendants.
+// 進行中子孫の未着手伝播
 func RollbackInProgressDescendants(descendants []Task) []Task {
 	result := append([]Task(nil), descendants...)
 	for index := range result {
@@ -234,4 +251,35 @@ func RollbackInProgressDescendants(descendants []Task) []Task {
 		}
 	}
 	return result
+}
+
+// 葉タスク進捗の検証（進行中の葉のみ0..95・5刻み）
+func ValidateLeafProgress(task Task, progress int) error {
+	if task.HasChildren || task.Status != InProgress {
+		return ErrInvalidProgress
+	}
+	if progress < 0 || progress > 95 || progress%5 != 0 {
+		return ErrInvalidProgress
+	}
+	return nil
+}
+
+// 子を失い葉へ戻った親の進捗正規化値
+func NormalizedLeafProgress(status Status) *int {
+	switch status {
+	case InProgress:
+		value := 0
+		return &value
+	case Completed:
+		value := 100
+		return &value
+	default:
+		return nil
+	}
+}
+
+// 復元可能な削除済みタスク
+type DeletedTask struct {
+	Task
+	DeletedAt time.Time
 }

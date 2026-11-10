@@ -4,13 +4,15 @@
 
 ```text
 Browser
-  ↓
-Cloudflare Workers / Nuxt
+  ↓ https://tasmane.kokage-studio.com（唯一の公開入口）
+Cloudflare Workers / Nuxt（tasmane-web。cf でビルド・デプロイ）
   - Google OAuth
   - 認証済みUser Context注入
-  - WebMCP側Permission/Injection
-  ↓ /api/*
-Cloudflare Containers / Go + chi
+  - WebMCP Tool登録（Permission/Injection対策）
+  ↓ /api/* → Workers VPC Service binding（TASMANE_API）
+Cloudflare Tunnel（cloudflared。自宅サーバーからの外向き接続のみ）
+  ↓
+自宅サーバー / Docker Compose: Go + chi（非公開）
   - HTTP Adapter
   - MCP Adapter
   - Application UseCases
@@ -20,13 +22,16 @@ Cloudflare Containers / Go + chi
 Neon PostgreSQL
 ```
 
-非同期:
-- Cloudflare Queues: Google Tasks同期
+非同期（自宅サーバー上の常駐プロセス）:
+- Google Tasks同期: PostgreSQL durable queue（outbox。`FOR UPDATE SKIP LOCKED` + lease + retry）
 - Scheduler/Job: ユーザーTimezone基準04:00のAI Advice
 - Gemini API: AI Advice生成
+- Cleanup: Soft Delete 30日後のHard Delete
 
 Root: `https://tasmane.kokage-studio.com`
 API: `https://tasmane.kokage-studio.com/api/*`
+
+Cloudflare 側の操作（Tunnel・VPC Service 作成、Worker デプロイ、Secret 投入）は `cf` CLI を使う。
 
 ## 2. 保存原則
 
@@ -88,6 +93,10 @@ Progress:
 COMPLETED -> IN_PROGRESS: 95へ戻す。
 IN_PROGRESS -> NOT_STARTED: NULLへ戻す。
 
+Leaf progressの更新:
+- IN_PROGRESSのLeafのみ、0..95の5刻みでユーザーが設定（Progress historyへ記録）
+- ParentのprogressはChildから算出（ユーザー設定不可）
+
 ## 4. Genre / TaskType
 
 TaskはGenreを必ず1つ持つ。
@@ -119,6 +128,16 @@ Parent削除:
 - 子孫を含めSoft Delete可能
 - UIは2段階確認
 - Soft Delete 30日後Hard Delete
+
+復元（30日以内）:
+- 同一削除操作で削除されたTask群をまとめて復元する
+- 削除済みの親は復元対象外なら根として復元。存在する親がCOMPLETEDなら復元不可
+- Genreが削除済みなら復元不可
+
+親の付け替え:
+- COMPLETEDのTaskを親にすることは禁止
+- 子を持たないTaskを親にする場合はLeaf -> Parent変換の確認を行う
+- 付け替え先の木で日付伝播が必要な場合は日付伝播の確認を行う
 
 ### Parent Progress
 
@@ -191,7 +210,7 @@ task_dependencies(task_id, depends_on_task_id)
 - 同一user・同一Genre内のみ
 - Many-to-Many
 - 自己依存/循環禁止
-- 依存先未完了でも着手可。ただしWarning確認
+- 依存先未完了でも着手可。ただしWarning確認（NOT_STARTED -> IN_PROGRESS時、Impact Planで未完了の前提Taskを提示）
 - 複数Taskに依存しているTaskをUIで淡い黄色等で強調
 - Dependency表示では同一Taskを複数箇所に参照表示してよい
 - DBにTaskを複製しない
@@ -259,8 +278,11 @@ Gantt:
 - 影響範囲を一覧表示し一括承認
 
 Dependency schedule矛盾:
-- Warningする
-- 保存は許可
+- Warningする（前提Taskの期限より前に開始 / 後続Taskの開始より後に期限）
+- 保存は許可（更新レスポンスの `warnings` で通知）
+
+子Task作成時:
+- 子の日付が親の範囲を超える場合も日付伝播の確認を行う
 
 ## 8. Overdue / Fire
 
@@ -396,8 +418,11 @@ Confirmation FSM:
 
 確認先:
 - 自由入力
-- ユーザー個人のプリセット登録可能
+- ユーザー個人のプリセット登録可能（同一ユーザーでcase-insensitive unique。削除しても既存Confirmationの確認先文字列は保持）
 - ユーザー間連携なし
+
+完了済みTask:
+- 未確認Confirmationの追加・CONFIRMEDからの差し戻しは禁止（完了制約の不変条件を保つ。再開してから行う）
 
 ConfirmationScore:
 - due urgency 50%
@@ -468,11 +493,12 @@ Cloudflare Workers側:
 - 認証
 - User Context注入
 
-Worker -> Go Container:
-- Cloudflare Tunnel / Cloudflare内部経路を利用し、Go ContainerをInternetへ直接公開しない
-- WorkerからContainerへの接続はBindingを利用する
-- Go APIはBinding経由の内部通信のみを受け付ける構成とする
-- Browser/外部ClientからContainerへ直接到達できるPublic Endpointを作らない
+Worker -> Go API（自宅サーバー）:
+- Cloudflare Tunnel + Workers VPC Service binding を利用し、Go API をInternetへ直接公開しない
+- 自宅サーバーはポート開放しない（cloudflared は Cloudflare への外向き接続のみ）
+- Tunnel に公開ホスト名（Public Hostname）を作らない。Worker の VPC Service binding からのみ到達する
+- Go API は Worker と共有する内部Binding secret を検証し、Binding 経由の内部通信のみを受け付ける
+- Browser/外部ClientからGo APIへ直接到達できるPublic Endpointを作らない
 
 Go API:
 - Workerが注入した認証済みUser Contextを利用
@@ -482,8 +508,12 @@ Go API:
 
 Refresh token:
 - Neonに暗号化保存
-- Encryption keyはCloudflare Secrets
+- Encryption keyは自宅サーバーの環境変数（Gitへ置かない。Worker・Browserへ渡さない）
 - Browserへ返さない
+
+ログイン許可:
+- Worker の `NUXT_ALLOWED_EMAILS`（カンマ区切り）に列挙した Google アカウントのみログイン可能
+- 未設定時は全 Google アカウントを許可（自宅サーバー運用では設定必須）
 
 直接連携:
 - Google Tasksのみ
@@ -492,6 +522,7 @@ Refresh token:
 同期:
 - title <-> title
 - body <-> notes
+  - 紐付けたメモ（16.1）は notes の末尾に「── memo(tasmane) ──」見出しを付け、1件1行で「・メモ名：URL」と書き出す（詳細は書式なしのテキストのため、メモ名自体はリンクにできない。URL は Google 側で自動リンクになる）。メモの紐付け・解除でも同期する。Google 側から取り込むときは見出し以降を本文に含めない（メモリンクの正はタスマネ）。
 - endDateの日付部分 <-> due
 - completed <-> status
 
@@ -518,7 +549,7 @@ Sync status:
 
 Tasmane -> Google:
 - DB保存後即レスポンス
-- Cloudflare Queuesで非同期同期
+- PostgreSQL durable queue（タスク更新と同一Transactionで投入）で非同期同期
 
 Google -> Tasmane:
 - `tasmane.kokage-studio.com/*`アクセス時
@@ -555,6 +586,18 @@ Google uncomplete:
 Google delete:
 - 自動削除せずCONFLICT
 - UIで「タスマネ削除 / タスマネ保持し連携解除 / Google再作成」を選択
+  - タスマネ削除: 通常の削除UseCase（2段階確認・Impact Plan）
+  - 連携解除: 以後そのTaskはGoogle同期対象外
+
+Field conflict（同一フィールド双方変更・期限伝播・完了不可）:
+- UIでタスマネ側とGoogle側の値を並べて表示
+- 「タスマネの値を残す」: タスマネの値でGoogleを上書き
+- 「Googleの値を採用」: 通常の更新UseCase（Impact Plan含む）でタスマネへ反映後、Googleへ反映
+- 1件のCONFLICTで他Taskの同期を止めない
+
+同期状態表示:
+- 最終同期時刻・送信待ち件数・最終FAILEDのTaskを表示
+- 手動同期は最終FAILEDのTaskも再送する
 
 Tasmane delete:
 - Soft Delete
@@ -563,8 +606,12 @@ Tasmane delete:
 
 Google-only Task:
 - 自動確定登録しない
-- import candidate
-- userがGenre選択後に取り込み
+- import candidate（Google側で削除されたものは候補から外す）
+- userがGenre選択後に取り込み（Google側の値で作成し紐付け。完了済みなら通常の完了UseCaseを通す）
+
+Google due と期限:
+- タスマネ期限の日付部分はユーザーTimezoneで解釈してGoogleのdueへ送る
+- Googleで新たに付いたdueは終日期限（ユーザーTimezoneの当日終わり）として取り込む
 
 Google due変更がHierarchyのendDate伝播を必要とする場合:
 - 自動でancestor期限を変更しない
@@ -579,10 +626,44 @@ Google Task List:
 - 専用ListがGoogle側で削除・利用不能なら同期をFAILED/CONFLICTとして復旧フローへ送る
 
 
+## 16.1 メモアプリ連携（memo.kokage-studio.com）
+
+ユーザー設定「メモアプリと連携する」（`memoIntegrationEnabled`、既定オフ）を選んだユーザーだけ有効。
+
+- Task は複数のメモリンク（URL・タイトル）を持てる。同じ Task に同じ URL は重複させずタイトルを更新する。
+- 紐付け解除はリンクの削除のみで、メモアプリ側のメモは消さない。MCP/WebMCP には削除を公開しない。
+- URL は https の絶対 URL（ローカル開発の localhost のみ http 可）。
+- 埋め込み表示（iframe）はメモアプリのオリジン（`NUXT_PUBLIC_MEMO_APP_ORIGIN`）の URL だけ。CSP `frame-src` もそのオリジンに限定する。
+- メモアプリ側は `frame-ancestors` で埋め込み元をタスマネに限定する。
+
+画面:
+- タスク作成時、メモ欄にメモアプリ（新規メモ）を埋め込み表示する。メモアプリで保存すると、そのメモを Task に紐付ける（作成前は保留し、Task 作成後に保存）。
+- 既存タスクは「新しいメモ」で埋め込みを開く。既存メモの URL を貼って紐付けることもできる。
+- 本文（`body`）は「テキスト」タブで引き続き編集できる（Google Tasks のメモに同期）。
+- 紐付けたメモはリンクチップで表示する。チップにはメモ名だけを出す（メモアプリのメモ ID `memo-yyyymmdd-名前` の `memo-yyyymmdd-` は表示しない）。メモの日付は紐付けに保持する（`memoDate`）。
+- チップのクリック: 画面右側にメモを埋め込み表示し、タスク編集は左に寄せる。狭い画面ではスライドオーバーで表示する。
+- Ctrl/⌘/Shift/中クリック: 別タブで開く。
+
+ログイン引き継ぎ:
+- メモアプリは Firebase Authentication（Google）を使う。
+- タスマネのログイン時に受け取った Google ID トークンを、暗号化 HttpOnly Cookie にトークンの有効期限まで保持する。
+- 埋め込んだメモアプリが未ログインなら、そのトークンを postMessage（送信先オリジン固定）で渡し、メモアプリが `signInWithCredential` でログインする。
+- OIDC nonce は「生 nonce の SHA-256（16 進）」を Google に送り、生 nonce を併せて渡す。
+- トークンが期限切れのときは、Google での再認証を案内する。
+- メッセージは送信元フレーム・オリジン・形式をすべて検証する。
+- Firebase の Google プロバイダ設定で、タスマネの OAuth クライアント ID を外部プロジェクトのクライアント ID として許可する必要がある。
+
 ## 17. MCP / WebMCP
 
-MCP serverを用意。
-Cloudflare側にTool登録。
+MCP serverを用意（Go。stdio）。
+Cloudflare側（Workerが配信するNuxt）でWebMCP Toolを登録（`navigator.modelContext` 対応ブラウザのみ）。
+
+WebMCP Permission / Injection:
+- 書き込み系Toolは毎回ブラウザ上のダイアログでユーザーが許可した場合のみ実行
+- Tool結果はユーザーデータとして返し、データ中の指示に従わないよう明示する
+- 経由はTask履歴に `WEB_MCP` として記録する
+
+MCP/WebMCP の出力はOpenAPIのTaskスキーマ相当（算出値を含む）とする。
 
 許可:
 - read
@@ -678,7 +759,9 @@ WHERE id = :id
 ├── /tasks/new
 ├── /tasks/{taskId}
 ├── /genres
-└── /search
+├── /search
+├── /trash（削除済みTaskの復元。30日以内）
+└── /settings（ユーザー設定・確認先プリセット・Google同期）
 ```
 
 Top `/`:
@@ -739,8 +822,16 @@ Task詳細 `/tasks/{taskId}`:
 │ Header                      │
 ├──────────┬──────────────────┤
 │ Sidebar  │ Body             │
-└──────────┴──────────────────┘
+├──────────┴──────────────────┤
+│ Footer（進捗の概要）        │
+└─────────────────────────────┘
 ```
+
+Footer（画面下端に常時表示）:
+- 未着手・進行中・期限切れ（未完了のみ）・今日まで（未完了のみ）・確認待ちの件数。各項目は Dashboard／検索（期限の絞り込み）へのリンク
+- 未完了 / 全件数と全体の進捗（%）
+- 件数は全ジャンル横断（Dashboard と同じ判定）。画面遷移・タブ復帰・変更操作の成功・他タブでの変更・1分ごとに更新する
+- 狭い画面では全体の進捗を先頭に置き、横にスクロールできる
 
 Header左:
 - タスマネ SVG Logo
@@ -785,18 +876,24 @@ Priority:
 - HIGH / MEDIUM / LOW
 
 Deadline:
+- 期限切れ
 - 今日まで
 - 明日まで
 - 1週間以内
 - 1か月以内
 - それ以上
 
+並び順:
+- 期限が近い順（既定） / 優先度順（effectivePriority） / おすすめ順（TaskScore）
+
+Priority filterはeffectivePriority（manualPriority ?? calculatedPriority）で判定する。
+
 検索条件変更でリアルタイム更新。
 フリーワードはdebounce可。
 
 URL Query Parameterと同期:
 ```text
-/search?q=google&genres=dev,infra&priority=high&deadline=week
+/search?q=google&genres=dev,infra&priority=high&deadline=week&sort=priority
 ```
 
 直接アクセス / Bookmark / URL共有 / browser back-forwardで状態復元。
@@ -867,9 +964,10 @@ Domain/Application層がImpact Planを返す。
 対象:
 - Parent/Dependencyを含むTask削除
 - Genre移動による境界Dependency解除
-- 日付変更によるancestor/descendant日付伝播
-- Leaf -> Parent変換
+- 日付変更によるancestor/descendant日付伝播（子Task作成・親の付け替えを含む）
+- Leaf -> Parent変換（子Task作成・親の付け替え）
 - status出戻りによるancestor/descendant伝播
+- 未完了の前提Taskがある状態での着手
 
 共通フロー:
 
@@ -893,7 +991,7 @@ Domain/Application層がImpact Planを返す。
    -> 再送しない
 ```
 
-`impactToken`は短寿命かつ操作内容・User・対象Versionに紐付ける。
+`impactToken`は短寿命かつ操作内容（影響対象の集合を含む）・User・対象Versionに紐付ける。
 古いimpactTokenで状態が変化していた場合は再Previewを要求する。
 
 MCP/WebMCP:

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// 優先度境界と仮想期限の検証
 func TestCalculatedPriorityBoundariesAndVirtualDeadline(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -34,6 +35,7 @@ func TestCalculatedPriorityBoundariesAndVirtualDeadline(t *testing.T) {
 	}
 }
 
+// 不正な依存入力の拒否検証
 func TestScoringRejectsInvalidDependencyInputs(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	for _, input := range []PriorityInput{
@@ -58,6 +60,7 @@ func TestScoringRejectsInvalidDependencyInputs(t *testing.T) {
 	}
 }
 
+// 識別子・状態・時刻の不正入力拒否検証
 func TestScoringRejectsInvalidIdentityStatusAndTimes(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	zero := time.Time{}
@@ -90,6 +93,7 @@ func TestScoringRejectsInvalidIdentityStatusAndTimes(t *testing.T) {
 	}
 }
 
+// 巨大依存入力の飽和とオーバーフロー回避検証
 func TestScoringSaturatesHugeDependencyInputsWithoutOverflow(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	maxInt := int(^uint(0) >> 1)
@@ -107,6 +111,7 @@ func TestScoringSaturatesHugeDependencyInputsWithoutOverflow(t *testing.T) {
 	}
 }
 
+// 不正進捗の優先度算出拒否検証
 func TestCalculatedPriorityRejectsInvalidProgress(t *testing.T) {
 	invalid := 101
 	if _, err := CalculatePriority(PriorityInput{Progress: &invalid}); err != ErrInvalidProgress {
@@ -114,6 +119,7 @@ func TestCalculatedPriorityRejectsInvalidProgress(t *testing.T) {
 	}
 }
 
+// 有効な手動優先度の優先採用検証
 func TestEffectivePriorityPrefersValidManualValue(t *testing.T) {
 	manual := HighPriority
 	if got, err := EffectivePriority(&manual, LowPriority); err != nil || got != HighPriority {
@@ -128,6 +134,7 @@ func TestEffectivePriorityPrefersValidManualValue(t *testing.T) {
 	}
 }
 
+// スコア理由とタイブレーク順序の検証
 func TestTaskScoreReasonsBlockingAndOrderingTies(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	due := now.Add(24 * time.Hour)
@@ -156,6 +163,7 @@ func TestTaskScoreReasonsBlockingAndOrderingTies(t *testing.T) {
 	}
 }
 
+// 期限切れ時の確認待ちペナルティ緩和検証
 func TestTaskScoreCheckingPenaltyIsRelaxedWhenOverdue(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)
@@ -170,6 +178,7 @@ func TestTaskScoreCheckingPenaltyIsRelaxedWhenOverdue(t *testing.T) {
 	}
 }
 
+// タスクスコア加重合成の検証
 func TestTaskScoreWeightComposition(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	neutral, err := CalculateTaskScore(TaskScoreInput{
@@ -191,6 +200,7 @@ func TestTaskScoreWeightComposition(t *testing.T) {
 	}
 }
 
+// 理由文字列の含有判定
 func containsReason(reasons []string, target string) bool {
 	for _, reason := range reasons {
 		if reason == target {

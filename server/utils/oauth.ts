@@ -22,6 +22,7 @@ interface GoogleJWKSet { keys?: SigningJWK[] }
 
 let cachedJWKs: { expiresAt: number, keys: SigningJWK[] } | undefined
 
+// Google 署名鍵の取得とキャッシュ
 async function googleKeys(fetcher: typeof fetch, now: number): Promise<SigningJWK[]> {
   if (cachedJWKs && cachedJWKs.expiresAt > now) return cachedJWKs.keys
   const response = await fetcher('https://www.googleapis.com/oauth2/v3/certs')
@@ -34,6 +35,7 @@ async function googleKeys(fetcher: typeof fetch, now: number): Promise<SigningJW
   return body.keys
 }
 
+// Google ID トークンの署名とクレーム検証
 export async function verifyGoogleIDToken(
   token: string,
   expected: { audience: string, nonce: string },
@@ -56,6 +58,7 @@ export async function verifyGoogleIDToken(
   const keys = options.keys ?? await googleKeys(options.fetcher ?? fetch, now)
   const jwk = keys.find(key => key.kid === header.kid && key.kty === 'RSA')
   if (!jwk) throw createError({ statusCode: 401, statusMessage: 'Unknown Google signing key' })
+  // RS256 署名検証と発行者・audience・nonce の突合
   const key = await crypto.subtle.importKey(
     'jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify'],
   )
@@ -71,6 +74,15 @@ export async function verifyGoogleIDToken(
   return { sub: claims.sub, email: claims.email, name: claims.name, picture: claims.picture }
 }
 
+// テスト用 JWK キャッシュの破棄
 export function resetGoogleKeyCacheForTests(): void {
   cachedJWKs = undefined
+}
+
+// 検証済み ID トークンの有効期限（読めなければ即時失効扱い）
+export function memoHandoffExpiry(idToken: string, now: number): number {
+  try {
+    const exp = decodeBase64UrlJSON<{ exp?: number }>(idToken.split('.')[1] ?? '').exp
+    return typeof exp === 'number' ? exp : now
+  } catch { return now }
 }

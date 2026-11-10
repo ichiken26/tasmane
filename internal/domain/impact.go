@@ -2,6 +2,7 @@ package domain
 
 import "sort"
 
+// ジャンル移動の影響計画
 type GenreMovePlan struct {
 	TaskID              string
 	NewGenreID          string
@@ -10,9 +11,9 @@ type GenreMovePlan struct {
 	RemovedDependencies []Dependency
 }
 
-// PlanGenreMove calculates the complete atomic mutation: subtree movement,
-// root detachment, and every dependency that would cross the new genre border.
+// 部分木移動と境界依存の原子変更計画
 func PlanGenreMove(tasks []GraphTask, dependencies []Dependency, taskID, newGenreID string) (GenreMovePlan, error) {
+	// 階層スナップショットと入力検証
 	byID, err := validatedHierarchySnapshot(tasks)
 	if err != nil {
 		return GenreMovePlan{}, err
@@ -27,6 +28,7 @@ func PlanGenreMove(tasks []GraphTask, dependencies []Dependency, taskID, newGenr
 	if target.GenreID == newGenreID {
 		return GenreMovePlan{}, ErrGraphGenre
 	}
+	// 移動対象部分木の収集
 	children := graphChildren(tasks)
 	moved := map[string]bool{}
 	queue := []string{taskID}
@@ -41,6 +43,7 @@ func PlanGenreMove(tasks []GraphTask, dependencies []Dependency, taskID, newGenr
 	}
 	movedIDs := sortedSet(moved)
 	removed := make([]Dependency, 0)
+	// ジャンル境界を跨ぐ依存の抽出
 	for _, dependency := range dependencies {
 		from, fromOK := byID[dependency.TaskID]
 		to, toOK := byID[dependency.DependsOnTaskID]
@@ -57,6 +60,7 @@ func PlanGenreMove(tasks []GraphTask, dependencies []Dependency, taskID, newGenr
 			removed = append(removed, dependency)
 		}
 	}
+	// 削除依存の安定ソート
 	sort.Slice(removed, func(i, j int) bool {
 		if removed[i].TaskID == removed[j].TaskID {
 			return removed[i].DependsOnTaskID < removed[j].DependsOnTaskID
@@ -69,11 +73,12 @@ func PlanGenreMove(tasks []GraphTask, dependencies []Dependency, taskID, newGenr
 	}, nil
 }
 
+// タスク削除の影響計画
 type TaskDeletionPlan struct{ TaskIDs []string }
 
-// PlanTaskDeletion closes over hierarchy descendants and reverse dependency
-// edges, yielding the exact deduplicated set that must be soft-deleted atomically.
+// 子孫と逆依存を含む原子削除対象の計画
 func PlanTaskDeletion(tasks []GraphTask, dependencies []Dependency, taskID string) (TaskDeletionPlan, error) {
+	// 階層スナップショットと入力検証
 	byID, err := validatedHierarchySnapshot(tasks)
 	if err != nil {
 		return TaskDeletionPlan{}, err
@@ -86,6 +91,7 @@ func PlanTaskDeletion(tasks []GraphTask, dependencies []Dependency, taskID strin
 	}
 	children := graphChildren(tasks)
 	dependents := make(map[string][]string)
+	// 依存関係の所有者とジャンル検証
 	for _, dependency := range dependencies {
 		from, fromOK := byID[dependency.TaskID]
 		to, toOK := byID[dependency.DependsOnTaskID]
@@ -100,6 +106,7 @@ func PlanTaskDeletion(tasks []GraphTask, dependencies []Dependency, taskID strin
 		}
 		dependents[dependency.DependsOnTaskID] = append(dependents[dependency.DependsOnTaskID], dependency.TaskID)
 	}
+	// 子孫と再帰的依存先の閉包収集
 	affected := map[string]bool{}
 	queue := []string{taskID}
 	for len(queue) > 0 {
@@ -115,19 +122,23 @@ func PlanTaskDeletion(tasks []GraphTask, dependencies []Dependency, taskID strin
 	return TaskDeletionPlan{TaskIDs: sortedSet(affected)}, nil
 }
 
+// 初回子追加の影響計画
 type ChildAdditionPlan struct {
 	RequiresConfirmation bool
 	ClearLeafProgress    bool
 	Parent               Task
 }
 
+// リーフから親への初回子追加計画
 func PlanFirstChildAddition(task Task) (ChildAdditionPlan, error) {
+	// 完了タスクと既存親の判定
 	if task.Status == Completed {
 		return ChildAdditionPlan{}, ErrNotCompletable
 	}
 	if task.HasChildren {
 		return ChildAdditionPlan{Parent: task.ForPersistence()}, nil
 	}
+	// リーフ進捗のクリアと確認要求
 	task.HasChildren = true
 	task = task.ForPersistence()
 	return ChildAdditionPlan{
@@ -137,6 +148,7 @@ func PlanFirstChildAddition(task Task) (ChildAdditionPlan, error) {
 	}, nil
 }
 
+// 階層スナップショットの検証付き索引
 func validatedHierarchySnapshot(tasks []GraphTask) (map[string]GraphTask, error) {
 	byID, err := indexGraphTasks(tasks)
 	if err != nil {
@@ -150,6 +162,7 @@ func validatedHierarchySnapshot(tasks []GraphTask) (map[string]GraphTask, error)
 	return byID, nil
 }
 
+// 親IDから子ID一覧への索引
 func graphChildren(tasks []GraphTask) map[string][]string {
 	children := make(map[string][]string)
 	for _, task := range tasks {
@@ -160,6 +173,7 @@ func graphChildren(tasks []GraphTask) map[string][]string {
 	return children
 }
 
+// 集合の安定ソート済みスライス化
 func sortedSet(values map[string]bool) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {

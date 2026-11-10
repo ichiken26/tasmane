@@ -4,8 +4,7 @@ import "errors"
 
 var ErrStatusImpactPlanChanged = errors.New("status impact plan changed")
 
-// StatusTransitionChange is one atomic status mutation in a rollback plan.
-// Progress is the persisted leaf_progress value; parent progress remains derived.
+// ロールバック計画の原子的な状態変更
 type StatusTransitionChange struct {
 	TaskID          string
 	FromStatus      Status
@@ -16,6 +15,7 @@ type StatusTransitionChange struct {
 	HasChildren     bool
 }
 
+// 状態遷移の影響計画
 type StatusTransitionPlan struct {
 	TaskID               string
 	ToStatus             Status
@@ -24,9 +24,9 @@ type StatusTransitionPlan struct {
 	Changes              []StatusTransitionChange
 }
 
-// PlanStatusTransition centralizes rollback propagation for every transport.
-// ancestors must be direct-parent first; descendants may be in any stable order.
+// 全経路共通の状態遷移ロールバック計画
 func PlanStatusTransition(target Task, ancestors, descendants []Task, to Status) (StatusTransitionPlan, error) {
+	// 対象タスクの遷移可否判定
 	next, err := target.Transition(to)
 	if err != nil {
 		return StatusTransitionPlan{}, err
@@ -34,14 +34,15 @@ func PlanStatusTransition(target Task, ancestors, descendants []Task, to Status)
 	plan := StatusTransitionPlan{TaskID: target.ID, ToStatus: to, ExpectedVersion: target.Version}
 	plan.Changes = append(plan.Changes, transitionChange(target, next))
 
+	// 完了巻き戻しと未着手リセットの伝播分岐
 	switch {
 	case target.Status == Completed && to == InProgress:
 		plan.RequiresConfirmation = true
-		// A parent rollback only changes the parent. Completed descendants and
-		// ancestors are deliberately preserved.
+		// 親の完了巻き戻し時の子孫と祖先の維持
 		if target.HasChildren {
 			return plan, nil
 		}
+		// 完了祖先の再開適用
 		changes, transitionErr := reopenCompletedAncestors(ancestors)
 		if transitionErr != nil {
 			return StatusTransitionPlan{}, transitionErr
@@ -52,6 +53,7 @@ func PlanStatusTransition(target Task, ancestors, descendants []Task, to Status)
 		if !target.HasChildren {
 			return plan, nil
 		}
+		// 進行中子孫の未着手リセット
 		changes, transitionErr := resetInProgressDescendants(descendants)
 		if transitionErr != nil {
 			return StatusTransitionPlan{}, transitionErr
@@ -61,6 +63,7 @@ func PlanStatusTransition(target Task, ancestors, descendants []Task, to Status)
 	return plan, nil
 }
 
+// 完了祖先の進行中再開
 func reopenCompletedAncestors(ancestors []Task) ([]StatusTransitionChange, error) {
 	changes := make([]StatusTransitionChange, 0, len(ancestors))
 	for _, ancestor := range ancestors {
@@ -76,6 +79,7 @@ func reopenCompletedAncestors(ancestors []Task) ([]StatusTransitionChange, error
 	return changes, nil
 }
 
+// 進行中子孫の未着手リセット
 func resetInProgressDescendants(descendants []Task) ([]StatusTransitionChange, error) {
 	changes := make([]StatusTransitionChange, 0, len(descendants))
 	for _, descendant := range descendants {
@@ -91,6 +95,7 @@ func resetInProgressDescendants(descendants []Task) ([]StatusTransitionChange, e
 	return changes, nil
 }
 
+// 遷移前後の差分レコード生成
 func transitionChange(from, to Task) StatusTransitionChange {
 	return StatusTransitionChange{
 		TaskID: from.ID, FromStatus: from.Status, ToStatus: to.Status,
@@ -99,6 +104,7 @@ func transitionChange(from, to Task) StatusTransitionChange {
 	}
 }
 
+// 整数ポインタの複製
 func cloneInt(value *int) *int {
 	if value == nil {
 		return nil

@@ -6,6 +6,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// PATCH入力の既存タスクへの適用
 func applyTaskPatch(current domain.Task, input patchTaskRequest) (domain.Task, error) {
 	next := current
 	if input.Title.Set {
@@ -47,67 +48,16 @@ func applyTaskPatch(current domain.Task, input patchTaskRequest) (domain.Task, e
 	return next, nil
 }
 
+// 不正リクエストを表すエラー
 type badRequestError struct{ message string }
 
+// 不正リクエストエラーの生成
 func errBadRequest(message string) error { return badRequestError{message: message} }
-func (e badRequestError) Error() string  { return e.message }
 
-func toDateTasks(tree []domain.Task) []domain.DateTask {
-	dateTasks := make([]domain.DateTask, 0, len(tree))
-	for _, task := range tree {
-		parent := ""
-		if task.ParentTaskID != nil {
-			parent = *task.ParentTaskID
-		}
-		dateTasks = append(dateTasks, domain.DateTask{ID: task.ID, ParentID: parent, StartAt: task.StartAt, EndAt: task.EndAt})
-	}
-	return dateTasks
-}
+// エラーメッセージの返却
+func (e badRequestError) Error() string { return e.message }
 
-func dateImpactRequired(taskID string, changes []domain.DateChange) bool {
-	for _, change := range changes {
-		if change.TaskID != taskID {
-			return true
-		}
-	}
-	return false
-}
-
-func buildUpdateImpactPlan(token string, changes []domain.DateChange, movePlan domain.GenreMovePlan, needsDateImpact, genreChanged bool) impactPlanResponse {
-	entities := make([]impactEntityResponse, 0, len(changes)+len(movePlan.MovedTaskIDs)+len(movePlan.RemovedDependencies))
-	warnings := []string{}
-	if needsDateImpact {
-		for _, change := range changes {
-			entities = append(entities, impactEntityResponse{ID: change.TaskID, Type: "TASK", Reason: stringPointer("DATE_PROPAGATION")})
-		}
-		warnings = append(warnings, "日付変更により関連タスクの日付も変更されます。")
-	}
-	if genreChanged {
-		for _, id := range movePlan.MovedTaskIDs {
-			entities = append(entities, impactEntityResponse{ID: id, Type: "TASK", Reason: stringPointer("GENRE_MOVE")})
-		}
-		for _, dependency := range movePlan.RemovedDependencies {
-			id := dependency.TaskID + "->" + dependency.DependsOnTaskID
-			entities = append(entities, impactEntityResponse{ID: id, Type: "DEPENDENCY", Reason: stringPointer("GENRE_BOUNDARY_REMOVAL")})
-		}
-		warnings = append(warnings, "Genre移動により境界を跨ぐ依存関係が解除されます。")
-	}
-	return impactPlanResponse{
-		Code: "IMPACT_CONFIRMATION_REQUIRED", ImpactToken: token, AffectedEntities: entities, Warnings: warnings,
-	}
-}
-
-func (h Handler) planGenreMove(r *http.Request, userID, taskID, genreID string) (domain.GenreMovePlan, error) {
-	if h.Relations.Repo == nil {
-		return domain.GenreMovePlan{}, errBadRequest("relation repository unavailable")
-	}
-	graphTasks, dependencies, err := h.Relations.Snapshot(r.Context(), userID)
-	if err != nil {
-		return domain.GenreMovePlan{}, err
-	}
-	return domain.PlanGenreMove(graphTasks, dependencies, taskID, genreID)
-}
-
+// 不正リクエストエラーのHTTP変換
 func writeBadRequest(w http.ResponseWriter, err error) {
 	message := err.Error()
 	status := http.StatusBadRequest

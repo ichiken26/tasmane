@@ -19,7 +19,8 @@
         "q": "string?",
         "genreIds": "uuid[]?",
         "priority": "LOW|MEDIUM|HIGH?",
-        "deadline": "string?"
+        "deadline": "today|tomorrow|week|month|later|overdue?",
+        "sort": "taskScore|priority|deadline?"
       }
     },
     {
@@ -62,6 +63,15 @@
       }
     },
     {
+      "name": "set_task_progress",
+      "action": "update",
+      "input": {
+        "taskId": "uuid",
+        "expectedVersion": "int",
+        "progress": "progress"
+      }
+    },
+    {
       "name": "create_confirmation",
       "action": "create",
       "input": {
@@ -93,6 +103,18 @@
         "taskId": "uuid",
         "dependsOnTaskId": "uuid",
         "expectedVersion": "int"
+      }
+    },
+    {
+      "name": "list_confirmation_targets",
+      "action": "read",
+      "input": {}
+    },
+    {
+      "name": "create_confirmation_target",
+      "action": "create",
+      "input": {
+        "name": "string"
       }
     },
     {

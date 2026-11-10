@@ -1,0 +1,65 @@
+# main への push で Nuxt Worker（tasmane-web）を cf でデプロイ
+# Go API は自宅サーバーで docker compose により更新する（docs/OPERATIONS.md）
+name: deploy-web
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "cmd/**"
+      - "internal/**"
+      - "db/**"
+      - "mcp/**"
+      - "docs/**"
+      - "spec/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build and deploy with cf
+        env:
+          CF_SEND_TELEMETRY: 'false'
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TASMANE_API_VPC_SERVICE_ID: ${{ secrets.TASMANE_API_VPC_SERVICE_ID }}
+          NUXT_GOOGLE_CLIENT_ID: ${{ secrets.NUXT_GOOGLE_CLIENT_ID }}
+          NUXT_GOOGLE_CLIENT_SECRET: ${{ secrets.NUXT_GOOGLE_CLIENT_SECRET }}
+          NUXT_GOOGLE_REDIRECT_URI: ${{ secrets.NUXT_GOOGLE_REDIRECT_URI }}
+          NUXT_SESSION_SECRET: ${{ secrets.NUXT_SESSION_SECRET }}
+          NUXT_INTERNAL_BINDING_SECRET: ${{ secrets.NUXT_INTERNAL_BINDING_SECRET }}
+          NUXT_ALLOWED_EMAILS: ${{ secrets.NUXT_ALLOWED_EMAILS }}
+        run: |
+          # 値は環境変数から展開し、ファイルはジョブ終了で破棄される
+          mkdir -p secrets
+          umask 077
+          {
+            echo 'NUXT_GOOGLE_CLIENT_ID=${NUXT_GOOGLE_CLIENT_ID}'
+            echo 'NUXT_GOOGLE_CLIENT_SECRET=${NUXT_GOOGLE_CLIENT_SECRET}'
+            echo 'NUXT_GOOGLE_REDIRECT_URI=${NUXT_GOOGLE_REDIRECT_URI}'
+            echo 'NUXT_SESSION_SECRET=${NUXT_SESSION_SECRET}'
+            echo 'NUXT_INTERNAL_BINDING_SECRET=${NUXT_INTERNAL_BINDING_SECRET}'
+            echo 'NUXT_ALLOWED_EMAILS=${NUXT_ALLOWED_EMAILS}'
+          } > secrets/worker.env
+          bash scripts/deploy-worker.sh

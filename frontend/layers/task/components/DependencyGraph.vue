@@ -1,40 +1,58 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { ApiDependency, ApiTask } from '../../core/composables/useCriticalData'
 import { useTasmaneApi } from '../../core/composables/useCriticalData'
+import { useNotify } from '../../shared/composables/useNotify'
 
+// Dependency Graph: task_dependenciesによる作業前提（Hierarchyとは別概念）
 const props = defineProps<{ task: ApiTask; dependencies: ApiDependency[] }>()
 const emit = defineEmits<{ changed: [task: ApiTask] }>()
 const api = useTasmaneApi()
-const dependsOnTaskId = ref('')
-const errorMessage = ref('')
+const notify = useNotify()
+const genreTasks = ref<ApiTask[]>([])
+const dependsOnTaskId = ref<string>()
 const busy = ref(false)
 
-async function addDependency() {
-  if (!dependsOnTaskId.value || busy.value) return
+// 同一ジャンルのタスク（依存は同一Genre内のみ）
+async function loadCandidates() {
+  try { genreTasks.value = await api.search({ genreIds: props.task.genreId }) }
+  catch { genreTasks.value = [] }
+}
+onMounted(loadCandidates)
+watch(() => props.task.genreId, loadCandidates)
+
+const byId = computed(() => new Map(genreTasks.value.map(task => [task.id, task])))
+const multiple = computed(() => props.dependencies.length > 1)
+const candidates = computed(() => genreTasks.value
+  .filter(task => task.id !== props.task.id && !props.dependencies.some(edge => edge.dependsOnTaskId === task.id))
+  .map(task => ({ label: task.title, value: task.id, description: task.status === 'COMPLETED' ? '完了済み' : undefined })))
+const blocking = computed(() => props.dependencies.filter(edge => byId.value.get(edge.dependsOnTaskId)?.status !== 'COMPLETED').length)
+
+// 依存関係の追加
+async function addDependency(id?: string) {
+  if (!id || busy.value) return
   busy.value = true
-  errorMessage.value = ''
   try {
-    await api.addDependency(props.task.id, dependsOnTaskId.value, props.task.version)
-    const saved = await api.task(props.task.id)
-    dependsOnTaskId.value = ''
-    emit('changed', saved)
-  } catch {
-    errorMessage.value = '依存を追加できませんでした。循環やジャンル境界を確認してください。'
+    await api.addDependency(props.task.id, id, props.task.version)
+    dependsOnTaskId.value = undefined
+    emit('changed', await api.task(props.task.id))
+  } catch (error) {
+    dependsOnTaskId.value = undefined
+    notify.error(error, '依存を追加できませんでした。循環になっていないか確認してください。')
   } finally {
     busy.value = false
   }
 }
 
+// 依存関係の削除
 async function removeDependency(dependsOn: string) {
   if (busy.value) return
   busy.value = true
-  errorMessage.value = ''
   try {
     await api.removeDependency(props.task.id, dependsOn, props.task.version)
     emit('changed', await api.task(props.task.id))
-  } catch {
-    errorMessage.value = '依存を削除できませんでした。'
+  } catch (error) {
+    notify.error(error, '依存を削除できませんでした。')
   } finally {
     busy.value = false
   }
@@ -42,28 +60,50 @@ async function removeDependency(dependsOn: string) {
 </script>
 
 <template>
-  <section class="card">
-    <h2>Dependency Graph</h2>
-    <p class="muted">Hierarchyとは異なる作業前提の参照です。</p>
-    <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
-    <ul>
+  <UCard :ui="{ body: 'p-2 sm:p-2' }">
+    <template #header>
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <h2 class="flex items-center gap-2 font-semibold text-(--ui-text-highlighted)"><UIcon name="i-lucide-workflow" class="size-5 text-(--ui-text-muted)" />Dependency Graph</h2>
+          <p class="text-xs text-(--ui-text-muted)">このタスクの前に終わらせたいタスク（作業前提）</p>
+        </div>
+        <UBadge v-if="blocking" :label="`未完了の前提 ${blocking}`" color="warning" variant="subtle" icon="i-lucide-octagon-alert" />
+      </div>
+    </template>
+    <UAlert v-if="multiple" color="warning" variant="subtle" icon="i-lucide-git-merge" title="複数のタスクに依存しています" class="mb-2" />
+    <!-- 依存一覧 -->
+    <ul v-if="dependencies.length" class="space-y-1">
       <li
         v-for="edge in dependencies"
         :key="`${edge.taskId}:${edge.dependsOnTaskId}`"
-        :class="{ 'multi-dependency': dependencies.length > 1 }"
+        class="flex items-center gap-2 rounded-md px-2 py-1.5"
+        :class="{ 'multi-dependency': multiple }"
       >
-        <strong>{{ task.title }}</strong>
-        <span> ← {{ edge.dependsOnTaskId }}</span>
-        <button type="button" class="danger" :disabled="busy" @click="removeDependency(edge.dependsOnTaskId)">削除</button>
+        <UIcon name="i-lucide-arrow-left-to-line" class="size-4 shrink-0 text-(--ui-text-dimmed)" aria-label="前提" />
+        <NuxtLink :to="`/tasks/${edge.dependsOnTaskId}`" class="min-w-0 flex-1 truncate text-sm hover:underline">
+          {{ byId.get(edge.dependsOnTaskId)?.title || '読み込み中…' }}
+        </NuxtLink>
+        <StatusBadge :value="byId.get(edge.dependsOnTaskId)?.status" />
+        <UTooltip text="依存を解除">
+          <UButton icon="i-lucide-unlink" size="xs" color="error" variant="ghost" :disabled="busy" aria-label="依存を解除" @click="removeDependency(edge.dependsOnTaskId)" />
+        </UTooltip>
       </li>
-      <li v-if="!dependencies.length">前提なし</li>
     </ul>
-    <form class="form compact" @submit.prevent="addDependency">
-      <label>
-        依存先 Task ID
-        <input v-model="dependsOnTaskId" required placeholder="uuid" />
-      </label>
-      <button class="primary" type="submit" :disabled="busy">依存を追加</button>
-    </form>
-  </section>
+    <p v-else class="px-2 py-3 text-sm text-(--ui-text-muted)">前提となるタスクはありません。</p>
+    <template #footer>
+      <!-- 依存追加 -->
+      <USelectMenu
+        v-model="dependsOnTaskId"
+        :items="candidates"
+        value-key="value"
+        :loading="busy"
+        icon="i-lucide-plus"
+        placeholder="前提タスクを追加…"
+        :search-input="{ placeholder: '同じジャンルのタスクを検索…' }"
+        class="w-full"
+        aria-label="前提タスクを追加"
+        @update:model-value="(value: string | undefined) => addDependency(value)"
+      />
+    </template>
+  </UCard>
 </template>

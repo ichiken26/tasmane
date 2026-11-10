@@ -2,6 +2,9 @@ import { createError, defineEventHandler, getQuery, getRequestURL, sendRedirect,
 import { setSession, takeOAuthTransaction } from '../../utils/auth'
 import { authConfig } from '../../utils/config'
 import { verifyGoogleIDToken } from '../../utils/oauth'
+import { memoHandoffExpiry } from '../../utils/oauth'
+import { setMemoHandoff } from '../../utils/memoHandoff'
+import { isEmailAllowed, sha256Hex } from '../../utils/security'
 import { fetchGoAPI, trustedProxyHeaders } from '../../utils/upstream'
 
 interface GoogleTokenResponse {
@@ -13,16 +16,19 @@ interface GoogleTokenResponse {
 }
 interface BootstrapResponse { userId?: string }
 
+// Google OAuth コールバックの検証とセッション発行
 export default defineEventHandler(async (event) => {
   setResponseHeader(event, 'cache-control', 'no-store')
   const config = authConfig(useRuntimeConfig(event))
   const query = getQuery(event)
   const transaction = await takeOAuthTransaction(event, config.sessionSecret)
+  // state/code とトランザクションの突合
   if (!transaction || typeof query.state !== 'string' || query.state !== transaction.state
     || typeof query.code !== 'string' || query.error)
     throw createError({ statusCode: 401, statusMessage: 'OAuth callback validation failed' })
 
   const redirectUri = config.googleRedirectUri || new URL('/auth/callback', getRequestURL(event)).toString()
+  // 認可コードのトークン交換
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -38,10 +44,15 @@ export default defineEventHandler(async (event) => {
   const tokens = await tokenResponse.json() as GoogleTokenResponse
   if (!tokenResponse.ok || tokens.error || !tokens.id_token)
     throw createError({ statusCode: 502, statusMessage: 'Google token exchange failed' })
+  // ID トークン検証と内部ブートストラップ
   const identity = await verifyGoogleIDToken(tokens.id_token, {
     audience: config.googleClientId,
-    nonce: transaction.nonce,
+    nonce: await sha256Hex(transaction.nonce),
   })
+
+  // 許可リスト外のアカウントはユーザー作成前に拒否
+  if (!isEmailAllowed(identity.email, config.allowedEmails))
+    throw createError({ statusCode: 403, statusMessage: 'This Google account is not allowed to use Tasmane' })
 
   const bootstrapBody = JSON.stringify({
     googleSubject: identity.sub,
@@ -60,6 +71,7 @@ export default defineEventHandler(async (event) => {
   const provisioned = await bootstrap.json() as BootstrapResponse
   if (!provisioned.userId) throw createError({ statusCode: 502, statusMessage: 'User provisioning returned no identity' })
 
+  // セッション Cookie 発行と returnTo 転送
   const now = Math.floor(Date.now() / 1000)
   await setSession(event, {
     userId: provisioned.userId,
@@ -70,5 +82,9 @@ export default defineEventHandler(async (event) => {
     issuedAt: now,
     expiresAt: now + 60 * 60 * 24 * 7,
   }, config.sessionSecret)
+  // メモアプリへのログイン引き継ぎ（ID トークンの有効期限まで）
+  await setMemoHandoff(event, {
+    sub: identity.sub, idToken: tokens.id_token, rawNonce: transaction.nonce, expiresAt: memoHandoffExpiry(tokens.id_token, now),
+  }, config.sessionSecret, now)
   return sendRedirect(event, transaction.returnTo, 303)
 })

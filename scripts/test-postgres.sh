@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 一時作業ディレクトリとテスト用ポートの準備
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work_dir=$(mktemp -d)
 data_dir=$(mktemp -d)
 socket_dir=$(mktemp -d)
 port=${TASMANE_TEST_POSTGRES_PORT:-55439}
 
+# 一時 Postgres と作業ディレクトリの後始末
 cleanup() {
   if [[ -x "$work_dir/root/usr/lib/postgresql/14/bin/pg_ctl" && -f "$data_dir/PG_VERSION" ]]; then
     LD_LIBRARY_PATH="$work_dir/root/usr/lib/x86_64-linux-gnu" \
@@ -16,18 +18,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# postgresql-14 関連 deb の展開
 cd "$work_dir"
 apt-get download postgresql-14 postgresql-client-14 postgresql-common libpq5 >/dev/null
 for package in ./*.deb; do
   dpkg-deb -x "$package" root
 done
 
+# 一時 Postgres の初期化と起動
 pg_bin="$work_dir/root/usr/lib/postgresql/14/bin"
 export LD_LIBRARY_PATH="$work_dir/root/usr/lib/x86_64-linux-gnu"
 "$pg_bin/initdb" -D "$data_dir" -A trust -U postgres --no-locale >/dev/null
 "$pg_bin/pg_ctl" -D "$data_dir" -l "$work_dir/postgres.log" \
   -o "-k $socket_dir -p $port -h 127.0.0.1" -w start >/dev/null
 
+# 拡張導入と対象 Go テストの実行
 export TEST_DATABASE_URL="postgres://postgres@127.0.0.1:$port/postgres?sslmode=disable"
 export PATH="/home/ichiken/.local/toolchains/go1.22.12/bin:$PATH"
 export GOFLAGS=-buildvcs=false

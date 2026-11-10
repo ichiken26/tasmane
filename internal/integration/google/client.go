@@ -22,6 +22,7 @@ import (
 const defaultAPIBase = "https://tasks.googleapis.com/tasks/v1"
 const defaultTokenURL = "https://oauth2.googleapis.com/token"
 
+// Google Tasks同期クライアント
 type Client struct {
 	HTTP         *http.Client
 	Store        *repository.Postgres
@@ -36,19 +37,25 @@ type Client struct {
 	tokens map[string]cachedToken
 }
 
+// アクセストークンの期限付きキャッシュ
 type cachedToken struct {
 	Value     string
 	ExpiresAt time.Time
 }
+
+// Googleタスクリストの応答
 type taskList struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 }
+
+// Googleタスクの応答
 type googleTask struct {
 	ID, Title, Notes, Due, Status, Updated string
 	Deleted                                bool
 }
 
+// GoogleタスクJSONのデコード
 func (t *googleTask) UnmarshalJSON(data []byte) error {
 	type wire struct {
 		ID      string `json:"id"`
@@ -67,6 +74,7 @@ func (t *googleTask) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// HTTP・URL・トークンキャッシュの既定値設定
 func (c *Client) defaults() {
 	if c.HTTP == nil {
 		c.HTTP = &http.Client{Timeout: 30 * time.Second}
@@ -82,12 +90,14 @@ func (c *Client) defaults() {
 	}
 }
 
+// リフレッシュトークンからのアクセストークン再発行
 func (c *Client) Refresh(ctx context.Context, userID string) error {
 	c.defaults()
 	integration, err := c.Store.GetGoogleIntegration(ctx, userID)
 	if err != nil {
 		return err
 	}
+	// 保存済みリフレッシュトークンの復号
 	refreshToken, err := c.Cipher.Decrypt(integration.EncryptedRefreshToken)
 	if err != nil {
 		return err
@@ -98,6 +108,7 @@ func (c *Client) Refresh(ctx context.Context, userID string) error {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// OAuthトークンエンドポイントの呼び出し
 	response, err := c.HTTP.Do(request)
 	if err != nil {
 		return err
@@ -125,6 +136,7 @@ func (c *Client) Refresh(ctx context.Context, userID string) error {
 	return nil
 }
 
+// 有効なアクセストークンの取得
 func (c *Client) accessToken(ctx context.Context, userID string) (string, error) {
 	c.defaults()
 	c.mu.Lock()
@@ -142,6 +154,7 @@ func (c *Client) accessToken(ctx context.Context, userID string) (string, error)
 	return cached.Value, nil
 }
 
+// 同期ジョブの実行
 func (c *Client) Execute(ctx context.Context, job domain.GoogleJob) error {
 	if c.Store == nil || c.ClientID == "" || c.ClientSecret == "" {
 		return errors.New("google client is not configured")
@@ -170,11 +183,18 @@ func (c *Client) Execute(ctx context.Context, job domain.GoogleJob) error {
 	}
 }
 
+// 専用タスクリストの確保
 func (c *Client) ensureDedicatedList(ctx context.Context, token string, integration repository.GoogleIntegration) (string, error) {
 	if integration.TaskListID != nil {
 		var existing taskList
 		err := c.requestJSON(ctx, token, http.MethodGet, "/users/@me/lists/"+url.PathEscape(*integration.TaskListID), nil, &existing)
 		if err != nil {
+			// 専用リストが削除された: 自動で作り直さず復旧フロー（UIの「専用リストを作り直す」）へ
+			var apiErr application.GoogleAPIError
+			if errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusGone) {
+				_ = c.Store.MarkGoogleTaskListMissing(ctx, integration.UserID)
+				return "", application.GoogleAPIError{Status: http.StatusBadRequest, Err: fmt.Errorf("dedicated Google Task List was deleted; recreate it from settings: %w", err)}
+			}
 			return "", fmt.Errorf("dedicated Google Task List unavailable: %w", err)
 		}
 		return existing.ID, nil
@@ -192,17 +212,24 @@ func (c *Client) ensureDedicatedList(ctx context.Context, token string, integrat
 	return created.ID, nil
 }
 
+// ローカルタスクのGoogleへの送信
 func (c *Client) push(ctx context.Context, token string, job domain.GoogleJob, listID string) error {
 	task, err := c.Tasks.Get(ctx, job.UserID, job.TaskID)
 	if err != nil {
 		return err
 	}
-	payload := map[string]any{"title": task.Title, "notes": nullableString(task.Body), "status": "needsAction"}
+	// 詳細（notes）は本文＋紐付けメモのURL
+	links, err := c.Store.ListMemoLinks(ctx, job.UserID, job.TaskID)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{"title": task.Title, "notes": domain.ComposeGoogleNotes(nullableString(task.Body), links), "status": "needsAction"}
 	if task.Status == domain.Completed {
 		payload["status"] = "completed"
 	}
 	if task.EndAt != nil {
-		payload["due"] = task.EndAt.UTC().Format("2006-01-02") + "T00:00:00.000Z"
+		// Google Tasks の due は日付のみ（ユーザーTimezoneでの期限日）
+		payload["due"] = domain.GoogleDueDate(*task.EndAt, c.Store.UserLocation(ctx, job.UserID)) + "T00:00:00.000Z"
 	}
 	sync, err := c.Store.GetGoogleTaskSync(ctx, job.UserID, job.TaskID)
 	path, method := "/lists/"+url.PathEscape(listID)+"/tasks", http.MethodPost
@@ -224,6 +251,7 @@ func (c *Client) push(ctx context.Context, token string, job domain.GoogleJob, l
 	return c.Store.SaveGoogleTaskSync(ctx, repository.GoogleTaskSync{UserID: job.UserID, TaskID: job.TaskID, GoogleTaskListID: listID, GoogleTaskID: remote.ID, Snapshot: snapshot})
 }
 
+// Google側タスクの削除
 func (c *Client) delete(ctx context.Context, token string, job domain.GoogleJob, listID string) error {
 	sync, err := c.Store.GetGoogleTaskSync(ctx, job.UserID, job.TaskID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -233,11 +261,16 @@ func (c *Client) delete(ctx context.Context, token string, job domain.GoogleJob,
 		return err
 	}
 	if err := c.requestJSON(ctx, token, http.MethodDelete, "/lists/"+url.PathEscape(listID)+"/tasks/"+url.PathEscape(sync.GoogleTaskID), nil, nil); err != nil {
-		return err
+		// Google側で既に削除済み（「タスマネ削除」で解決したコンフリクト等）は成功扱い
+		var apiErr application.GoogleAPIError
+		if !errors.As(err, &apiErr) || (apiErr.Status != http.StatusNotFound && apiErr.Status != http.StatusGone) {
+			return err
+		}
 	}
 	return c.Store.DisconnectGoogleTask(ctx, job.UserID, job.TaskID)
 }
 
+// Google側タスク一覧の取込
 func (c *Client) pull(ctx context.Context, token, userID, listID string) error {
 	pageToken := ""
 	for {
@@ -253,7 +286,12 @@ func (c *Client) pull(ctx context.Context, token, userID, listID string) error {
 			return err
 		}
 		for _, remote := range page.Items {
+			// 1件のコンフリクトで他タスクの同期を止めない（コンフリクトはタスク単位で記録済み）
 			if err := c.ingestRemote(ctx, userID, listID, remote); err != nil {
+				var apiErr application.GoogleAPIError
+				if errors.As(err, &apiErr) && apiErr.DomainConflict {
+					continue
+				}
 				return err
 			}
 		}
@@ -264,9 +302,14 @@ func (c *Client) pull(ctx context.Context, token, userID, listID string) error {
 	}
 }
 
+// リモートタスクの新規同期またはマージ
 func (c *Client) ingestRemote(ctx context.Context, userID, listID string, remote googleTask) error {
 	sync, err := c.Store.FindGoogleTaskSync(ctx, userID, listID, remote.ID)
 	if errors.Is(err, sql.ErrNoRows) {
+		// Google側で削除済みのGoogle-only Taskは候補にしない
+		if remote.Deleted {
+			return nil
+		}
 		snapshot, _ := json.Marshal(snapshotOf(remote))
 		return c.Store.SaveGoogleTaskSync(ctx, repository.GoogleTaskSync{
 			UserID: userID, GoogleTaskListID: listID, GoogleTaskID: remote.ID, Snapshot: snapshot,
@@ -275,15 +318,22 @@ func (c *Client) ingestRemote(ctx context.Context, userID, listID string, remote
 	if err != nil {
 		return err
 	}
-	if remote.Deleted {
-		return c.conflict(ctx, userID, sync.TaskID, "GOOGLE_DELETED", errors.New("Google task deleted; user resolution required"))
-	}
 	if sync.TaskID == "" {
-		return nil
+		// 未取込候補: Google側削除なら破棄、それ以外は最新値へ更新
+		if remote.Deleted {
+			return c.Store.DeleteGoogleImportCandidate(ctx, userID, listID, remote.ID)
+		}
+		snapshot, _ := json.Marshal(snapshotOf(remote))
+		sync.Snapshot = snapshot
+		return c.Store.SaveGoogleTaskSync(ctx, sync)
+	}
+	if remote.Deleted {
+		return c.conflictWithRemote(ctx, userID, sync.TaskID, "GOOGLE_DELETED", errors.New("Google task deleted; user resolution required"), remote)
 	}
 	return c.mergeRemote(ctx, userID, sync, remote)
 }
 
+// リモート変更のローカルへの三方マージ
 func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository.GoogleTaskSync, remote googleTask) error {
 	ctx = repository.WithGoogleInbound(ctx)
 	local, err := c.Tasks.Get(ctx, userID, sync.TaskID)
@@ -293,13 +343,14 @@ func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository
 	base := map[string]string{}
 	_ = json.Unmarshal(sync.Snapshot, &base)
 	remoteSnapshot := snapshotOf(remote)
+	location := c.Store.UserLocation(ctx, userID)
 	localSnapshot := map[string]string{"title": local.Title, "notes": nullableString(local.Body), "status": googleStatus(local.Status)}
 	if local.EndAt != nil {
-		localSnapshot["due"] = local.EndAt.Format("2006-01-02")
+		localSnapshot["due"] = domain.GoogleDueDate(*local.EndAt, location)
 	}
 	merged := domain.MergeGoogleSnapshot(base, localSnapshot, remoteSnapshot)
 	if len(merged.Conflicts) != 0 {
-		return c.conflict(ctx, userID, sync.TaskID, "FIELD_CONFLICT", fmt.Errorf("field conflict: %s", strings.Join(merged.Conflicts, ",")))
+		return c.conflictWithRemote(ctx, userID, sync.TaskID, "FIELD_CONFLICT", fmt.Errorf("field conflict: %s", strings.Join(merged.Conflicts, ",")), remote)
 	}
 	updated := local
 	updated.Title = merged.Merged["title"]
@@ -309,16 +360,18 @@ func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository
 		var endAt time.Time
 		var err error
 		if local.EndAt == nil {
-			endAt, err = time.Parse("2006-01-02", due)
+			// 新規の期限は終日扱い（ユーザーTimezoneの当日終わり）
+			endAt, err = domain.GoogleAllDayEnd(due, location)
 		} else {
-			endAt, err = domain.MergeGoogleDue(*local.EndAt, due)
+			// 既存の時刻（hh:mm）はユーザーTimezoneで保持
+			endAt, err = domain.MergeGoogleDue(local.EndAt.In(location), due)
 		}
 		if err != nil {
 			return err
 		}
 		changes, err := c.Store.PlanGoogleDueUpdate(ctx, userID, local.ID, &endAt)
 		if err != nil {
-			return c.conflict(ctx, userID, sync.TaskID, "DUE_HIERARCHY", err)
+			return c.conflictWithRemote(ctx, userID, sync.TaskID, "DUE_HIERARCHY", err, remote)
 		}
 		updated.EndAt = &endAt
 		if _, err = c.Tasks.Update(ctx, userID, domain.TaskUpdate{Task: updated, DateChanges: changes}, local.Version); err != nil {
@@ -328,7 +381,7 @@ func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository
 	} else if local.EndAt != nil {
 		changes, err := c.Store.PlanGoogleDueUpdate(ctx, userID, local.ID, nil)
 		if err != nil {
-			return c.conflict(ctx, userID, sync.TaskID, "DUE_HIERARCHY", err)
+			return c.conflictWithRemote(ctx, userID, sync.TaskID, "DUE_HIERARCHY", err, remote)
 		}
 		updated.EndAt = nil
 		if _, err = c.Tasks.Update(ctx, userID, domain.TaskUpdate{Task: updated, DateChanges: changes}, local.Version); err != nil {
@@ -343,7 +396,7 @@ func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository
 	}
 	if remote.Status == "completed" && local.Status != domain.Completed {
 		if _, err := c.Tasks.GoogleComplete(ctx, userID, local.ID, local.Version); err != nil {
-			return c.conflict(ctx, userID, sync.TaskID, "COMPLETE_BLOCKED", err)
+			return c.conflictWithRemote(ctx, userID, sync.TaskID, "COMPLETE_BLOCKED", err, remote)
 		}
 	}
 	if remote.Status != "completed" && local.Status == domain.Completed {
@@ -356,28 +409,35 @@ func (c *Client) mergeRemote(ctx context.Context, userID string, sync repository
 	return c.Store.SaveGoogleTaskSync(ctx, sync)
 }
 
-func (c *Client) conflict(ctx context.Context, userID, taskID, code string, cause error) error {
+// Google同期衝突の記録（UIで双方の値を提示するためGoogle側値も保存）
+func (c *Client) conflictWithRemote(ctx context.Context, userID, taskID, code string, cause error, remote googleTask) error {
 	if taskID != "" {
-		if err := c.Store.RecordGoogleConflict(ctx, userID, taskID, code, cause.Error()); err != nil {
+		snapshot, _ := json.Marshal(snapshotOf(remote))
+		if err := c.Store.RecordGoogleConflictWithRemote(ctx, userID, taskID, code, cause.Error(), snapshot); err != nil {
 			return err
 		}
 	}
 	return application.GoogleAPIError{Status: http.StatusConflict, DomainConflict: true, Err: cause}
 }
 
+// マージ比較用スナップショットの抽出
 func snapshotOf(task googleTask) map[string]string {
-	value := map[string]string{"title": task.Title, "notes": task.Notes, "status": task.Status}
+	value := map[string]string{"title": task.Title, "notes": domain.GoogleNotesBody(task.Notes), "status": task.Status}
 	if len(task.Due) >= 10 {
 		value["due"] = task.Due[:10]
 	}
 	return value
 }
+
+// nil文字列の空文字化
 func nullableString(value *string) string {
 	if value == nil {
 		return ""
 	}
 	return *value
 }
+
+// ドメイン状態からGoogle状態への変換
 func googleStatus(status domain.Status) string {
 	if status == domain.Completed {
 		return "completed"
@@ -385,6 +445,7 @@ func googleStatus(status domain.Status) string {
 	return "needsAction"
 }
 
+// Bearer付きJSONリクエストの送信
 func (c *Client) requestJSON(ctx context.Context, token, method, path string, input, output any) error {
 	var body io.Reader
 	if input != nil {
@@ -416,6 +477,7 @@ func (c *Client) requestJSON(ctx context.Context, token, method, path string, in
 	return json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(output)
 }
 
+// Google APIエラーのデコード
 func decodeAPIError(response *http.Response) error {
 	payload, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 	return application.GoogleAPIError{Status: response.StatusCode, Err: fmt.Errorf("Google API %d: %s", response.StatusCode, strings.TrimSpace(string(payload)))}

@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// 下書き検証と正規化の検証
 func TestNewTaskValidatesAndNormalizesDraft(t *testing.T) {
 	start, end := day(10), day(9)
 	if _, err := NewTask("id", "user", TaskDraft{GenreID: "genre", Title: "   "}); !errors.Is(err, ErrInvalidTaskInput) {
@@ -25,6 +26,7 @@ func TestNewTaskValidatesAndNormalizesDraft(t *testing.T) {
 	}
 }
 
+// 状態遷移と完了不変条件の検証
 func TestTransitionFSMAndCompletionInvariant(t *testing.T) {
 	base := Task{Status: NotStarted}
 	active, err := base.Transition(InProgress)
@@ -49,6 +51,7 @@ func TestTransitionFSMAndCompletionInvariant(t *testing.T) {
 	}
 }
 
+// 親の派生進捗非永続化の検証
 func TestParentTransitionNeverPersistsDerivedProgress(t *testing.T) {
 	parent := Task{ID: "parent", Status: NotStarted, Progress: intPointer(75), HasChildren: true}
 	active, err := parent.Transition(InProgress)
@@ -75,8 +78,10 @@ func TestParentTransitionNeverPersistsDerivedProgress(t *testing.T) {
 	}
 }
 
+// テスト用の整数ポインタ生成
 func intPointer(value int) *int { return &value }
 
+// 実効優先度加重の親進捗検証
 func TestParentProgressUsesEffectivePriorityWeights(t *testing.T) {
 	children := []ProgressContribution{
 		{Progress: intPointer(100), EffectivePriority: HighPriority},
@@ -84,7 +89,7 @@ func TestParentProgressUsesEffectivePriorityWeights(t *testing.T) {
 		{Progress: nil, EffectivePriority: LowPriority},
 	}
 	progress, err := ParentProgress(InProgress, children)
-	if err != nil || progress != 72 { // floor((100*5 + 50*3 + 0*1) / 9)
+	if err != nil || progress != 72 { // 優先度加重の切り捨て進捗
 		t.Fatalf("progress=%d err=%v", progress, err)
 	}
 	progress, err = ParentProgress(InProgress, []ProgressContribution{{Progress: intPointer(100), EffectivePriority: HighPriority}})
@@ -97,6 +102,7 @@ func TestParentProgressUsesEffectivePriorityWeights(t *testing.T) {
 	}
 }
 
+// 子欠落と不正入力の親進捗拒否検証
 func TestParentProgressRejectsMissingChildrenAndInvalidInputs(t *testing.T) {
 	if _, err := ParentProgress(InProgress, nil); !errors.Is(err, ErrParentNeedsChildren) {
 		t.Fatal(err)
@@ -112,6 +118,7 @@ func TestParentProgressRejectsMissingChildrenAndInvalidInputs(t *testing.T) {
 	}
 }
 
+// 巻き戻し伝播の検証
 func TestRollbackPropagation(t *testing.T) {
 	ancestors := []Task{
 		{ID: "parent", Status: Completed, Progress: intPointer(100)},

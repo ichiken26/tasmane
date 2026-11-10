@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// 子の期間拡張の祖先伝播検証
 func TestPlanDateChangePropagatesChildExpansionToAncestors(t *testing.T) {
 	d3, d4, d5, d10, d15, d16, d20 := day(3), day(4), day(5), day(10), day(15), day(16), day(20)
 	tasks := []DateTask{
@@ -26,6 +27,7 @@ func TestPlanDateChangePropagatesChildExpansionToAncestors(t *testing.T) {
 	}
 }
 
+// 親の期間収縮の全子孫伝播検証
 func TestPlanDateChangePropagatesParentContractionToAllDescendants(t *testing.T) {
 	d3, d5, d7, d8, d9, d10, d15 := day(3), day(5), day(7), day(8), day(9), day(10), day(15)
 	tasks := []DateTask{
@@ -44,6 +46,7 @@ func TestPlanDateChangePropagatesParentContractionToAllDescendants(t *testing.T)
 	assertDates(t, byID["grandchild"].After, &d8, &d8)
 }
 
+// 決定的な影響一覧と不正計画拒否の検証
 func TestPlanDateChangeIsDeterministicAndRejectsInvalidPlans(t *testing.T) {
 	d1, d2, d3 := day(1), day(2), day(3)
 	tasks := []DateTask{{ID: "b", StartAt: &d1, EndAt: &d3}, {ID: "a", ParentID: "b", StartAt: &d1, EndAt: &d2}}
@@ -65,10 +68,12 @@ func TestPlanDateChangeIsDeterministicAndRejectsInvalidPlans(t *testing.T) {
 	}
 }
 
+// テスト用の日付生成
 func day(value int) time.Time {
 	return time.Date(2026, 8, value, 0, 0, 0, 0, time.UTC)
 }
 
+// 日付変更のタスクID索引
 func indexDateChanges(changes []DateChange) map[string]DateChange {
 	result := make(map[string]DateChange, len(changes))
 	for _, change := range changes {
@@ -77,6 +82,7 @@ func indexDateChanges(changes []DateChange) map[string]DateChange {
 	return result
 }
 
+// 日付範囲の期待値照合
 func assertDates(t *testing.T, got DateRange, start, end *time.Time) {
 	t.Helper()
 	if !sameInstant(got.StartAt, start) || !sameInstant(got.EndAt, end) {

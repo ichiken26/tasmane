@@ -193,3 +193,11 @@
 - Canonical JSON source hashing reuses unexpired advice for identical inputs; a unique database index prevents concurrent duplicates.
 - Advice expires exactly 30 days after generation and scheduler cleanup deletes expired rows through the repository boundary.
 - Additive migration 0006 and the six-migration fresh PostgreSQL suite pass.
+## 2026-11-09 — Spec alignment, home-server topology, cf CLI, security hardening
+
+- Topology changed by owner: Nuxt on Cloudflare Workers, Go on a home server (Docker Compose), connected via Cloudflare Tunnel + Workers VPC Service binding. Cloudflare Containers config removed; Cloudflare operations use `cf` (Worker build via `scripts/cf-build.sh` → `cf deploy --prebuilt`). Recorded in `spec/DECISIONS_2026-11-09.md`.
+- Shared projection (`domain.ProjectTasks` / `application.Projections`): effectivePriority (manual ?? calculated), parent progress weighted by child effective priority, fire, TaskScore, canComplete — used by every HTTP task response, search, dashboard, MCP and WebMCP.
+- Impact orchestration moved from transport to `application.TaskCommands` (HTTP/MCP shared): create (leaf→parent + ancestor date propagation), update (reparent rules, genre move, date propagation), transition (unmet prerequisite warning), delete (token bound to deletion set), leaf progress.
+- New: leaf progress API, trash/restore, confirmation target presets, Google conflict resolution/import/status/failed requeue/list recovery, access-time auto sync, dependency schedule warnings, WebMCP tools with user permission, search `genreIds`/`overdue`/`sort`.
+- Fixes: auto-sync SQL type error, pull aborting on one conflict, Google due date in user timezone, parent progress normalization after child loss, unresolved confirmations on completed tasks, 500 error detail leakage, CSRF via same-site subdomains, login allowlist, `/v1` duplicate public path removed.
+- Migrations 0008/0009 (additive). OpenAPI 0.3.0 with router contract test. Go (incl. PostgreSQL integration, -race) and frontend tests, lint, typecheck, contract validation, `cf deploy --dry-run` pass.

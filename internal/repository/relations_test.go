@@ -10,6 +10,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// グラフロック内での親子付け再検証
 func TestPostgresSetParentRevalidatesGraphInsideLockedTransaction(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -29,6 +30,7 @@ func TestPostgresSetParentRevalidatesGraphInsideLockedTransaction(t *testing.T) 
 	}
 }
 
+// グラフロック内での依存追加と永続化
 func TestPostgresAddDependencyRevalidatesAndPersistsInsideLock(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -53,6 +55,7 @@ func TestPostgresAddDependencyRevalidatesAndPersistsInsideLock(t *testing.T) {
 	}
 }
 
+// グラフ読取SQLの期待設定
 func expectGraphRows(mock sqlmock.Sqlmock, first, second []driver.Value, dependencies [][]driver.Value) {
 	mock.ExpectQuery("SELECT id, user_id, genre_id").WithArgs("user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "genre_id", "parent_id"}).AddRow(first...).AddRow(second...))

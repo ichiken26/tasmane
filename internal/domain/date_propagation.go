@@ -6,11 +6,13 @@ import (
 	"time"
 )
 
+// 日付伝播ドメインのエラー群
 var (
 	ErrInvalidDatePropagation = errors.New("invalid date propagation")
 	ErrInvalidDateRange       = errors.New("start must not be after end")
 )
 
+// 日付伝播用の階層スナップショット
 type DateTask struct {
 	ID       string
 	ParentID string
@@ -18,24 +20,24 @@ type DateTask struct {
 	EndAt    *time.Time
 }
 
+// 開始と終了の日付範囲
 type DateRange struct {
 	StartAt *time.Time
 	EndAt   *time.Time
 }
 
+// 日付変更の前後差分
 type DateChange struct {
 	TaskID string
 	Before DateRange
 	After  DateRange
 }
 
-// PlanDateChange returns every mutation required to keep an edited task within
-// its ancestors and all descendants within the edited task. The returned list
-// is stable by TaskID so HTTP, MCP, and sync adapters can present one shared
-// impact plan without deriving hierarchy effects themselves.
+// 祖先拡張と子孫収縮を含む日付変更計画
 func PlanDateChange(tasks []DateTask, taskID string, startAt, endAt *time.Time) ([]DateChange, error) {
 	byID := make(map[string]DateTask, len(tasks))
 	children := make(map[string][]string, len(tasks))
+	// タスク索引と日付範囲の入力検証
 	for _, task := range tasks {
 		if task.ID == "" || invalidDateRange(task.StartAt, task.EndAt) {
 			if invalidDateRange(task.StartAt, task.EndAt) {
@@ -71,13 +73,14 @@ func PlanDateChange(tasks []DateTask, taskID string, startAt, endAt *time.Time) 
 		return nil, ErrInvalidDatePropagation
 	}
 
+	// 編集対象の提案範囲設定
 	proposed := make(map[string]DateRange, len(tasks))
 	for _, task := range tasks {
 		proposed[task.ID] = DateRange{StartAt: task.StartAt, EndAt: task.EndAt}
 	}
 	proposed[taskID] = DateRange{StartAt: startAt, EndAt: endAt}
 
-	// Extend ancestors only where the edited boundary crosses an existing one.
+	// 編集境界を超える祖先範囲の拡張
 	for parentID := target.ParentID; parentID != ""; parentID = byID[parentID].ParentID {
 		rangeValue := proposed[parentID]
 		if startAt != nil && rangeValue.StartAt != nil && startAt.Before(*rangeValue.StartAt) {
@@ -89,7 +92,7 @@ func PlanDateChange(tasks []DateTask, taskID string, startAt, endAt *time.Time) 
 		proposed[parentID] = rangeValue
 	}
 
-	// Contract every descendant that crosses the edited task's new boundary.
+	// 編集境界を超える子孫範囲の収縮
 	var contractDescendants func(string)
 	contractDescendants = func(parentID string) {
 		for _, childID := range children[parentID] {
@@ -106,6 +109,7 @@ func PlanDateChange(tasks []DateTask, taskID string, startAt, endAt *time.Time) 
 	}
 	contractDescendants(taskID)
 
+	// 差分の安定ソートと計画生成
 	ids := make([]string, 0, len(tasks))
 	for id, after := range proposed {
 		beforeTask := byID[id]
@@ -130,14 +134,17 @@ func PlanDateChange(tasks []DateTask, taskID string, startAt, endAt *time.Time) 
 	return changes, nil
 }
 
+// 開始が終了より後かの判定
 func invalidDateRange(startAt, endAt *time.Time) bool {
 	return startAt != nil && endAt != nil && startAt.After(*endAt)
 }
 
+// 日付範囲の同一判定
 func sameDateRange(left, right DateRange) bool {
 	return sameInstant(left.StartAt, right.StartAt) && sameInstant(left.EndAt, right.EndAt)
 }
 
+// 時刻ポインタの同一判定
 func sameInstant(left, right *time.Time) bool {
 	if left == nil || right == nil {
 		return left == right
@@ -145,6 +152,7 @@ func sameInstant(left, right *time.Time) bool {
 	return left.Equal(*right)
 }
 
+// 日付階層の循環検出
 func hasDateHierarchyCycle(tasks map[string]DateTask) bool {
 	for id := range tasks {
 		seen := map[string]bool{}

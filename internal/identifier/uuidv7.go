@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// UUIDv7Generator produces time-ordered RFC 9562 UUIDv7 identifiers. Calls on
-// one generator are strictly monotonic, including when the clock stalls or moves
-// backwards.
+// RFC 9562 準拠の単調UUIDv7生成器
 type UUIDv7Generator struct {
 	mu     sync.Mutex
 	now    func() time.Time
@@ -18,13 +16,16 @@ type UUIDv7Generator struct {
 	seq    uint16
 }
 
+// UUIDv7生成器の生成
 func NewUUIDv7Generator() *UUIDv7Generator {
 	return &UUIDv7Generator{now: time.Now}
 }
 
+// 単調なUUIDv7の生成
 func (g *UUIDv7Generator) New() (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	// 時計逆行時のミリ秒固定とシーケンス繰り上げ
 	ms := g.now().UnixMilli()
 	if ms < g.lastMS {
 		ms = g.lastMS
@@ -36,6 +37,7 @@ func (g *UUIDv7Generator) New() (string, error) {
 			g.seq = 0
 		}
 	} else {
+		// 新ミリ秒の乱数シーケンス初期化
 		var seed [2]byte
 		if _, err := rand.Read(seed[:]); err != nil {
 			return "", fmt.Errorf("seed uuidv7 sequence: %w", err)
@@ -43,6 +45,7 @@ func (g *UUIDv7Generator) New() (string, error) {
 		g.seq = (uint16(seed[0])<<8 | uint16(seed[1])) & 0x0fff
 	}
 	g.lastMS = ms
+	// タイムスタンプと版・バリアントの埋め込み
 	var id [16]byte
 	for i := 5; i >= 0; i-- {
 		id[i] = byte(ms)
@@ -57,6 +60,7 @@ func (g *UUIDv7Generator) New() (string, error) {
 	return format(id), nil
 }
 
+// 16バイトのハイフン付き16進文字列化
 func format(id [16]byte) string {
 	var dst [36]byte
 	hex.Encode(dst[0:8], id[0:4])

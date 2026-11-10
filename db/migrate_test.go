@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+// プロセス間 updated_at 競合の記録
 func TestUpdatedAtProcessWorker(t *testing.T) {
 	databaseURL := os.Getenv("TASMANE_PROCESS_DATABASE_URL")
 	schema := os.Getenv("TASMANE_PROCESS_SCHEMA")
@@ -48,6 +49,7 @@ func TestUpdatedAtProcessWorker(t *testing.T) {
 
 const advisoryLockSQL = `SELECT pg_advisory_xact_lock($1)`
 
+// 未適用マイグレーションのトランザクション適用順序の検証
 func TestMigrateAppliesPendingMigrationTransactionally(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -103,6 +105,30 @@ func TestMigrateAppliesPendingMigrationTransactionally(t *testing.T) {
 	mock.ExpectExec("ALTER TABLE google_sync_jobs").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0007_google_job_leases.sql").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0008_google_conflict_resolution.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("ALTER TABLE google_task_syncs ADD COLUMN conflict_remote_snapshot").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0008_google_conflict_resolution.sql").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0009_google_task_list_recovery.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("ALTER TABLE google_integrations ADD COLUMN task_list_missing_at").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0009_google_task_list_recovery.sql").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0010_memo_links.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("ALTER TABLE user_server_settings ADD COLUMN memo_integration_enabled").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0010_memo_links.sql").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0011_memo_link_date.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("ALTER TABLE task_memo_links ADD COLUMN memo_date").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version) VALUES ($1)`)).WithArgs("0011_memo_link_date.sql").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	if err := Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +137,7 @@ func TestMigrateAppliesPendingMigrationTransactionally(t *testing.T) {
 	}
 }
 
+// 適用済みマイグレーションのスキップ検証
 func TestMigrateSkipsRecordedMigration(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -149,6 +176,22 @@ func TestMigrateSkipsRecordedMigration(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0007_google_job_leases.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0008_google_conflict_resolution.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0009_google_task_list_recovery.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0010_memo_links.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(advisoryLockSQL)).WithArgs(migrationLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`)).WithArgs("0011_memo_link_date.sql").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectCommit()
 	if err := Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +200,14 @@ func TestMigrateSkipsRecordedMigration(t *testing.T) {
 	}
 }
 
+// nil DB 拒否の検証
 func TestMigrateRejectsNilDatabase(t *testing.T) {
 	if err := Migrate(context.Background(), nil); err == nil || err.Error() != "database is required" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
+// 履歴表作成失敗の伝播検証
 func TestMigrateReportsHistoryCreationFailure(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -176,6 +221,7 @@ func TestMigrateReportsHistoryCreationFailure(t *testing.T) {
 	}
 }
 
+// コミット前失敗時のロールバック検証
 func TestApplyRollsBackEveryPreCommitFailure(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -229,6 +275,7 @@ func TestApplyRollsBackEveryPreCommitFailure(t *testing.T) {
 	}
 }
 
+// コミット失敗の伝播検証
 func TestApplyReportsCommitFailure(t *testing.T) {
 	for _, alreadyApplied := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pending", true: "already applied"}[alreadyApplied], func(t *testing.T) {
@@ -256,6 +303,7 @@ func TestApplyReportsCommitFailure(t *testing.T) {
 	}
 }
 
+// 新規 Postgres への適用とスキーマ制約の検証
 func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -281,6 +329,7 @@ func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 	config.RuntimeParams["search_path"] = schema + ", public"
 	database := stdlib.OpenDB(*config)
 	defer database.Close()
+	// マイグレーションの冪等適用
 	if err := Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
@@ -291,9 +340,10 @@ func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 		t.Fatalf("third idempotent run: %v", err)
 	}
 	var count int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil || count != 7 {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil || count != 11 {
 		t.Fatalf("migration history count=%d err=%v", count, err)
 	}
+	// 一意制約と UUIDv7 variant の拒否
 	if _, err := database.Exec(`INSERT INTO users (id, google_subject, email) VALUES ('01890f3e-4c00-7000-8000-000000000001','one','one@example.com')`); err != nil {
 		t.Fatal(err)
 	}
@@ -323,6 +373,7 @@ func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 	if _, err := database.Exec(`CREATE TABLE process_update_results (worker text PRIMARY KEY, updated_at timestamptz NOT NULL UNIQUE)`); err != nil {
 		t.Fatal(err)
 	}
+	// プロセス間 updated_at の一意性検証
 	const processes = 8
 	processErrors := make(chan error, processes)
 	var processGroup sync.WaitGroup
@@ -353,6 +404,7 @@ func TestMigrationAppliesToFreshPostgresAndEnforcesSchema(t *testing.T) {
 	if processCount != processes || distinctTimestampCount != processes {
 		t.Fatalf("process updates=%d distinct timestamps=%d", processCount, distinctTimestampCount)
 	}
+	// 並行更新時の updated_at 衝突検出
 	const updates = 16
 	timestamps := make(chan time.Time, updates)
 	errors := make(chan error, updates)

@@ -16,6 +16,7 @@ const taskReadColumns = `task.id, task.user_id, task.genre_id, task.task_type_id
   EXISTS (SELECT 1 FROM tasks child WHERE child.parent_task_id=task.id
           AND child.user_id=task.user_id AND child.deleted_at IS NULL) AS has_children`
 
+// タスク検索
 func (p *Postgres) Search(ctx context.Context, userID string, search domain.TaskSearch) ([]domain.Task, error) {
 	if p == nil || p.database == nil || userID == "" {
 		return nil, domain.ErrForbidden
@@ -40,13 +41,18 @@ func (p *Postgres) Search(ctx context.Context, userID string, search domain.Task
 			return nil, domain.ErrInvalidTaskInput
 		}
 		args = append(args, boundary)
-		if search.Deadline == "later" {
+		switch search.Deadline {
+		case "later":
 			query += fmt.Sprintf(` AND task.end_at >= $%d`, len(args))
-		} else {
+		case "overdue":
+			// 期限切れは未完了タスクのみ（isOverdueと同じ定義）
+			query += fmt.Sprintf(` AND task.end_at < $%d AND task.status <> 'COMPLETED'::task_status`, len(args))
+		default:
 			query += fmt.Sprintf(` AND task.end_at < $%d`, len(args))
 		}
 	}
 	query += ` ORDER BY task.end_at NULLS LAST, task.id`
+	// 検索SQLの実行
 	rows, err := p.database.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search tasks: %w", err)
@@ -55,10 +61,12 @@ func (p *Postgres) Search(ctx context.Context, userID string, search domain.Task
 	return scanTaskRows(rows)
 }
 
+// タスク木の取得
 func (p *Postgres) Tree(ctx context.Context, userID, taskID string) ([]domain.Task, error) {
 	if p == nil || p.database == nil || userID == "" || taskID == "" {
 		return nil, domain.ErrForbidden
 	}
+	// 祖先・子孫ツリーSQLの実行
 	rows, err := p.database.QueryContext(ctx, `WITH RECURSIVE ancestors AS (
     SELECT task.id, task.parent_task_id FROM tasks task
     WHERE task.id=$1 AND task.user_id=$2 AND task.deleted_at IS NULL
@@ -90,6 +98,7 @@ func (p *Postgres) Tree(ctx context.Context, userID, taskID string) ([]domain.Ta
 	return tasks, nil
 }
 
+// タスク行のスキャン
 func scanTaskRows(rows *sql.Rows) ([]domain.Task, error) {
 	tasks := []domain.Task{}
 	for rows.Next() {
@@ -98,6 +107,7 @@ func scanTaskRows(rows *sql.Rows) ([]domain.Task, error) {
 		var status string
 		var progress sql.NullInt64
 		var startAt, endAt sql.NullTime
+		// 1行のスキャン
 		if err := rows.Scan(&task.ID, &task.UserID, &task.GenreID, &taskTypeID, &parentTaskID,
 			&task.Title, &body, &status, &progress, &startAt, &endAt, &task.IsAllDay,
 			&priority, &task.Version, &task.CreatedAt, &task.HasChildren); err != nil {
@@ -135,8 +145,11 @@ func scanTaskRows(rows *sql.Rows) ([]domain.Task, error) {
 	return tasks, nil
 }
 
+// 期限境界の算出
 func deadlineBoundary(value string, now time.Time) (time.Time, bool) {
 	switch value {
+	case "overdue":
+		return now, true
 	case "today":
 		return now.Add(24 * time.Hour), true
 	case "tomorrow":

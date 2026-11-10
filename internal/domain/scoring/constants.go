@@ -1,5 +1,6 @@
 package scoring
 
+// 優先度・タスク・確認スコアの加重と閾値
 const (
 	PriorityDeadlineWeight   = 0.50
 	PriorityProgressWeight   = 0.30
@@ -27,4 +28,5 @@ const (
 	ConfirmationNoDueChecking    = 40
 )
 
+// 期限緊急度の時間帯閾値
 var DeadlineUrgencyThresholdHours = []float64{24, 24 * 7, 24 * 30}

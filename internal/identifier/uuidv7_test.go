@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// 版・バリアントと単調性の検証
 func TestUUIDv7VersionVariantAndMonotonicity(t *testing.T) {
 	g := NewUUIDv7Generator()
 	g.now = func() time.Time { return time.UnixMilli(1700000000000) }
@@ -36,6 +37,7 @@ func TestUUIDv7VersionVariantAndMonotonicity(t *testing.T) {
 	}
 }
 
+// 並行生成時の一意性検証
 func TestUUIDv7ConcurrentUniqueness(t *testing.T) {
 	g := NewUUIDv7Generator()
 	const count = 1000

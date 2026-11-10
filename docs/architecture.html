@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>タスマネ ファイル・関数相関</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "dark",
+      securityLevel: "strict",
+      flowchart: { htmlLabels: true, curve: "basis" },
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #171e27;
+      --ink: #e8eef5;
+      --muted: #93a4b8;
+      --line: #2a3644;
+      --accent: #7dd3c0;
+      --accent-2: #f0c27a;
+      --chip: #223040;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font: 15px/1.65 "IBM Plex Sans JP", "Hiragino Sans", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a33 0%, var(--bg) 55%);
+    }
+    .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+    nav {
+      position: sticky; top: 0; height: 100vh; overflow: auto;
+      padding: 28px 18px; border-right: 1px solid var(--line); background: #0c1116;
+    }
+    nav h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin: 0 0 16px; }
+    nav a { display: block; color: var(--muted); text-decoration: none; padding: 6px 8px; border-radius: 8px; }
+    nav a:hover { background: var(--chip); color: var(--ink); }
+    main { padding: 40px 48px 80px; max-width: 1100px; }
+    h2 { margin: 48px 0 12px; font-size: 28px; }
+    h3 { margin: 32px 0 10px; font-size: 20px; color: var(--accent-2); }
+    p, li { color: var(--muted); }
+    .lead { font-size: 18px; max-width: 46rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 20px 0 28px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px;
+    }
+    .card strong { display: block; color: var(--ink); margin-bottom: 4px; }
+    .diagram {
+      background: #101820; border: 1px solid var(--line); border-radius: 16px; padding: 20px; overflow-x: auto; margin: 16px 0 28px;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 28px; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { color: var(--accent); font-weight: 600; }
+    code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: #c9e7df; }
+    .note { color: var(--accent-2); font-size: 13px; }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: relative; height: auto; }
+      main { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav>
+      <h1>Tasmane Map</h1>
+      <a href="#overview">全体像</a>
+      <a href="#runtime">プロセス</a>
+      <a href="#layers">層依存</a>
+      <a href="#auth">認証と転送</a>
+      <a href="#files">ファイルカタログ</a>
+      <a href="#fn">関数相関</a>
+      <a href="#contracts">契約</a>
+      <a href="#deploy">デプロイ</a>
+    </nav>
+    <main>
+      <p class="note">正本仕様 spec/PRODUCT_SPEC.md ／ Markdown版 docs/architecture.md</p>
+      <h2 id="overview">1. 全体像</h2>
+      <p class="lead">Browser は Nuxt Worker のみに到達。業務 API の本体は Go。MCP は任意の別入口。</p>
+      <div class="grid">
+        <div class="card"><strong>公開</strong>Nuxt Worker（OAuth・session・proxy）</div>
+        <div class="card"><strong>非公開</strong>Go API / google-worker / advice / cleanup</div>
+        <div class="card"><strong>任意</strong>MCP。Web と独立した stdin/stdout</div>
+        <div class="card"><strong>データ</strong>PostgreSQL。Domain 規則は Transport に置かない</div>
+      </div>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+  subgraph public [公開面]
+    Browser[Browser]
+    NuxtWorker[Nuxt Worker]
+  end
+  subgraph private [非公開面]
+    GoAPI[Go API]
+    GoogleW[google-worker]
+    AdviceS[advice-scheduler]
+    Cleanup[cleanup]
+    MCP[mcp optional]
+  end
+  Neon[(PostgreSQL)]
+  GoogleAuth[Google OAuth]
+  GoogleTasks[Google Tasks]
+  Gemini[Gemini]
+  Browser --> NuxtWorker
+  NuxtWorker --> GoAPI
+  NuxtWorker --> GoogleAuth
+  GoAPI --> Neon
+  GoogleW --> Neon
+  GoogleW --> GoogleTasks
+  AdviceS --> Neon
+  AdviceS --> Gemini
+  Cleanup --> Neon
+  MCP --> Neon
+        </pre>
+      </div>
+
+      <h2 id="runtime">2. ランタイムプロセス</h2>
+      <table>
+        <thead><tr><th>プロセス</th><th>入口</th><th>役割</th></tr></thead>
+        <tbody>
+          <tr><td>tasmane-web</td><td><code>nuxt.config.ts</code> / <code>cloudflare.config.ts</code></td><td>公開 UI・OAuth・Go proxy・WebMCP</td></tr>
+          <tr><td>tasmane-api</td><td><code>cmd/api</code> / <code>docker-compose.prod.yml</code></td><td>自宅サーバーの Go API（Tunnel 経由のみ）</td></tr>
+          <tr><td>google-worker</td><td><code>cmd/google-worker</code></td><td>Tasks 同期 consumer</td></tr>
+          <tr><td>advice-scheduler</td><td><code>cmd/advice-scheduler</code></td><td>TZ 04:00 以降の Advice</td></tr>
+          <tr><td>cleanup</td><td><code>cmd/cleanup</code></td><td>30日後 hard delete</td></tr>
+          <tr><td>mcp</td><td><code>cmd/mcp</code></td><td>任意。ユーザー固定</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="layers">3. 層依存</h2>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart BT
+  pages[pages] --> composables[composables]
+  components[components] --> composables
+  composables --> nitro[server Nitro]
+  nitro --> httpapi[httpapi]
+  mcpSrv[mcp server] --> application
+  googleInt[google integration] --> application
+  httpapi --> application[application]
+  application --> domain[domain]
+  application --> repository[repository]
+  repository --> domain
+  repository --> postgres[(PostgreSQL)]
+        </pre>
+      </div>
+
+      <h2 id="auth">4. 認証と API 転送</h2>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+  participant B as Browser
+  participant N as Nuxt server
+  participant G as Google
+  participant A as Go API
+  B->>N: GET /auth/login
+  N->>G: Authorization Code PKCE
+  G->>N: /auth/callback
+  N->>A: /internal/auth/bootstrap
+  N-->>B: session cookie
+  B->>N: /api/v1/tasks
+  N->>A: /v1/tasks Binding header
+  A-->>B: JSON via Nuxt
+        </pre>
+      </div>
+      <p>secret は <code>runtimeConfig.public</code> に置かない。<code>NUXT_GOOGLE_CLIENT_SECRET</code> は callback のサーバー POST のみ。</p>
+
+      <h2 id="files">5. ファイルカタログ</h2>
+      <h3>UI / Worker</h3>
+      <table>
+        <thead><tr><th>ファイル</th><th>役割</th></tr></thead>
+        <tbody>
+          <tr><td><code>pages/*.vue</code></td><td>画面。データは composable 経由</td></tr>
+          <tr><td><code>frontend/layers/core/composables/useCriticalData.ts</code></td><td>重要取得と useTasmaneApi</td></tr>
+          <tr><td><code>frontend/layers/*/components/*.vue</code></td><td>Dashboard / Task / Impact UI</td></tr>
+          <tr><td><code>server/routes/auth/*.ts</code></td><td>login / callback / logout / session</td></tr>
+          <tr><td><code>server/utils/proxyGo.ts</code></td><td>session 後の Go 転送</td></tr>
+          <tr><td><code>server/utils/upstream.ts</code></td><td>Binding または loopback</td></tr>
+          <tr><td><code>cloudflare.config.ts</code></td><td>cf 用 Worker 定義（VPC Service binding・Secret 宣言）</td></tr>
+        </tbody>
+      </table>
+      <h3>Go</h3>
+      <table>
+        <thead><tr><th>層</th><th>ファイル</th><th>役割</th></tr></thead>
+        <tbody>
+          <tr><td>入口</td><td><code>cmd/api/main.go</code></td><td>migrate・router・shutdown</td></tr>
+          <tr><td>HTTP</td><td><code>internal/transport/httpapi/*</code></td><td>/v1 と bootstrap / health</td></tr>
+          <tr><td>UC</td><td><code>internal/application/*</code></td><td>所有権と共通ユースケース</td></tr>
+          <tr><td>規則</td><td><code>internal/domain/*</code></td><td>FSM・影響範囲・スコア</td></tr>
+          <tr><td>永続化</td><td><code>internal/repository/*</code></td><td>Postgres とテスト用 Memory</td></tr>
+          <tr><td>外部</td><td><code>internal/integration/*</code></td><td>Google Tasks / Gemini</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="fn">6. 関数相関</h2>
+      <h3>状態遷移</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  UI[TaskLifecycle] --> API[transitionTask]
+  API --> Proxy[proxyAuthenticatedGoAPI]
+  Proxy --> H[handler.transitionTask]
+  H --> UC[Tasks.TransitionWithImpact]
+  UC --> Dom[PlanStatusTransition]
+  UC --> Tok[ImpactTokens]
+  UC --> Repo[ApplyStatusTransition]
+        </pre>
+      </div>
+      <table>
+        <thead><tr><th>操作</th><th>UI</th><th>HTTP</th><th>UseCase</th><th>Domain</th><th>Persist</th></tr></thead>
+        <tbody>
+          <tr><td>作成</td><td>TaskEditor</td><td>createTask</td><td>Tasks.Create</td><td>NewTask</td><td>Postgres.Create</td></tr>
+          <tr><td>更新</td><td>TaskEditor / Gantt</td><td>updateTask</td><td>Tasks.Update</td><td>PlanDateChange / PlanGenreMove</td><td>Postgres.Update</td></tr>
+          <tr><td>削除</td><td>TaskLifecycle</td><td>deleteTask</td><td>Tasks.Delete</td><td>PlanTaskDeletion</td><td>Postgres.DeleteTask</td></tr>
+          <tr><td>Genre</td><td>genres.vue</td><td>list/create/rename</td><td>Catalog</td><td>catalog.go</td><td>catalog.go</td></tr>
+          <tr><td>依存</td><td>DependencyGraph</td><td>add/removeDependency</td><td>Relations</td><td>ValidateDependencyAddition</td><td>relations.go</td></tr>
+        </tbody>
+      </table>
+      <h3>Google 同期</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+  Web[POST /v1/google/sync] --> Enq[GoogleJobs.Trigger]
+  Enq --> Q[(google_sync_jobs)]
+  Worker[google-worker] --> Claim[Claim SKIP LOCKED]
+  Claim --> Cons[GoogleConsumer.Consume]
+  Cons --> Client[google client]
+  Cons --> Dom[ClassifyGoogleFailure]
+        </pre>
+      </div>
+      <h3>Advice</h3>
+      <p><code>AdviceScheduler.RunOnce</code> → <code>ShouldGenerateAdvice</code> → <code>Advices.Generate</code> → Gemini → <code>SaveAdvice</code>。Dashboard は <code>Advices.Current</code>。</p>
+      <h3>MCP</h3>
+      <p><code>cmd/mcp</code> → <code>mcp.Server.Handle</code> → 同じ application。DELETE 非公開。ユーザーは <code>TASMANE_MCP_USER_ID</code>。</p>
+
+      <h2 id="contracts">7. 契約</h2>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  Spec[PRODUCT_SPEC] --> OpenAPI[openapi.yaml]
+  Spec --> MCPJSON[mcp/tools.json]
+  Spec --> Domain[internal/domain]
+  OpenAPI --> HTTP[httpapi]
+  MCPJSON --> MCP[mcp/server.go]
+  Domain --> HTTP
+  Domain --> MCP
+  Domain --> Google[google-worker]
+        </pre>
+      </div>
+
+      <h2 id="deploy">8. デプロイ</h2>
+      <div class="grid">
+        <div class="card"><strong>Web</strong>deploy-worker.sh → cf-build.sh → cf deploy --prebuilt</div>
+        <div class="card"><strong>自宅サーバー</strong>deploy-go.sh → docker-compose（api・cloudflared）</div>
+        <div class="card"><strong>私有ホスト</strong>docker-compose.prod.yml / deploy-go.sh</div>
+      </div>
+      <p class="note">生成物 worker-configuration.d.ts と .env は相関図の対象外。</p>
+    </main>
+  </div>
+</body>
+</html>

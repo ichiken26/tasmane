@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// 期限超過子孫からの炎伝播検証
 func TestProjectDeadlineStatePropagatesFireFromOverdueDescendants(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	past, future := now.Add(-time.Second), now.Add(time.Second)
@@ -34,6 +35,7 @@ func TestProjectDeadlineStatePropagatesFireFromOverdueDescendants(t *testing.T) 
 	assertDeadlineState(t, got, "boundary", false, false)
 }
 
+// 不正階層の期限投影拒否検証
 func TestProjectDeadlineStateRejectsInvalidHierarchy(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -54,12 +56,14 @@ func TestProjectDeadlineStateRejectsInvalidHierarchy(t *testing.T) {
 	}
 }
 
+// ゼロ基準時刻の拒否検証
 func TestProjectDeadlineStateRejectsZeroNow(t *testing.T) {
 	if _, err := ProjectDeadlineState(nil, time.Time{}); !errors.Is(err, ErrInvalidDeadlineProjection) {
 		t.Fatalf("got %v", err)
 	}
 }
 
+// 期限状態の期待値照合
 func assertDeadlineState(t *testing.T, states map[string]DeadlineState, id string, overdue, fire bool) {
 	t.Helper()
 	got, ok := states[id]

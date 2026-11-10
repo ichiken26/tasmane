@@ -11,33 +11,50 @@ import (
 	"tasmane/internal/domain"
 )
 
+// Google同期HTTPのメモリスタブ
 type googleHTTPStore struct{ jobs []domain.GoogleJob }
 
+// 同期ロックの即時取得
 func (*googleHTTPStore) AcquireGoogleSyncLock(context.Context, string, time.Time, time.Duration) (bool, error) {
 	return true, nil
 }
-func (*googleHTTPStore) MarkSyncing(context.Context, domain.GoogleJob) error          { return nil }
-func (*googleHTTPStore) MarkSynced(context.Context, domain.GoogleJob) error           { return nil }
-func (*googleHTTPStore) MarkFailed(context.Context, domain.GoogleJob, string) error   { return nil }
+
+// 同期中状態への更新
+func (*googleHTTPStore) MarkSyncing(context.Context, domain.GoogleJob) error { return nil }
+
+// 同期完了状態への更新
+func (*googleHTTPStore) MarkSynced(context.Context, domain.GoogleJob) error { return nil }
+
+// 同期失敗状態への更新
+func (*googleHTTPStore) MarkFailed(context.Context, domain.GoogleJob, string) error { return nil }
+
+// 衝突状態への更新
 func (*googleHTTPStore) MarkConflict(context.Context, domain.GoogleJob, string) error { return nil }
 
+// 同期ジョブのキュー投入
 func (s *googleHTTPStore) Enqueue(_ context.Context, job domain.GoogleJob) error {
 	s.jobs = append(s.jobs, job)
 	return nil
 }
+
+// 衝突一覧の固定返却
 func (*googleHTTPStore) ListGoogleConflicts(context.Context, string) ([]domain.GoogleConflictRecord, error) {
 	return []domain.GoogleConflictRecord{{TaskID: "t1", Code: "DUE_CONFLICT"}}, nil
 }
+
+// 取込候補一覧の固定返却
 func (*googleHTTPStore) ListGoogleImportCandidates(context.Context, string) ([]domain.GoogleImportCandidate, error) {
 	return []domain.GoogleImportCandidate{{GoogleTaskListID: "l1", GoogleTaskID: "gt1"}}, nil
 }
 
+// 認証ユーザーを使うGoogleルートの応答確認
 func TestGoogleRoutesUseAuthenticatedUser(t *testing.T) {
 	store := &googleHTTPStore{}
 	router := InternalAuth("secret", NewRouter(Handler{
 		GoogleJobs:    application.GoogleJobs{Queue: store},
 		GoogleQueries: application.GoogleQueries{Repo: store},
 	}))
+	// 認証ヘッダ付きリクエスト送信
 	request := func(method, path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, nil)
 		req.Header.Set("X-Tasmane-Internal-Binding", "secret")

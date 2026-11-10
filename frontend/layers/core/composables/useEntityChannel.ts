@@ -16,6 +16,7 @@ const hasExactKeys = (value: Record<string, unknown>, keys: string[]) => {
 const isKind = (value: unknown): value is EntityKind => typeof value === 'string' && entityKinds.includes(value as EntityKind)
 const isVersion = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1
 const rfc3339Pattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/
+// タイムスタンプ妥当性の検証
 const isTimestamp = (value: unknown): value is string => {
   if (typeof value !== 'string') return false
   const match = rfc3339Pattern.exec(value)
@@ -32,6 +33,7 @@ const isTimestamp = (value: unknown): value is string => {
   return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth && hour <= 23 && minute <= 59 && second <= 59 && offsetHour <= 23 && offsetMinute <= 59 && !Number.isNaN(Date.parse(value))
 }
 
+// エンティティメッセージのパース
 export function parseEntityMessage(data: unknown): EntityMessage | undefined {
   if (!isRecord(data) || typeof data.type !== 'string') return undefined
   if (data.type === 'ENTITY_SNAPSHOT') {
@@ -47,6 +49,7 @@ export function parseEntityMessage(data: unknown): EntityMessage | undefined {
   return undefined
 }
 
+// エンティティ状態へのメッセージ適用
 export function applyEntityMessage<T extends Versioned>(entityKind: EntityKind, current: T | undefined, message: EntityMessage | undefined): T | undefined {
   if (!message || !current) return current
   if (message.type === 'ENTITY_INVALIDATED') return message.entityKind === entityKind && message.entityId === current.id && message.version >= current.version ? undefined : current
@@ -55,6 +58,7 @@ export function applyEntityMessage<T extends Versioned>(entityKind: EntityKind, 
   return payload.id === message.entity.id && payload.version === message.entity.version ? payload as T : current
 }
 
+// BroadcastChannelでのエンティティ同期
 export function useEntityChannel<T extends Versioned>(entityKind: EntityKind, entity: Ref<T | undefined>) {
   if (!import.meta.client || typeof BroadcastChannel === 'undefined') return { publish: () => undefined }
   const channel = new BroadcastChannel('tasmane-entities')
@@ -62,5 +66,6 @@ export function useEntityChannel<T extends Versioned>(entityKind: EntityKind, en
     entity.value = applyEntityMessage(entityKind, entity.value, parseEntityMessage(data))
   }
   onScopeDispose(() => channel.close())
-  return { publish: (value: T) => channel.postMessage({ type: 'ENTITY_SNAPSHOT', entity: { kind: entityKind, id: value.id, version: value.version, payload: value }, sentAt: new Date().toISOString() }) }
+  // リアクティブProxyはstructured cloneできないためプレーンなJSONへ変換して送信
+  return { publish: (value: T) => channel.postMessage({ type: 'ENTITY_SNAPSHOT', entity: { kind: entityKind, id: value.id, version: value.version, payload: JSON.parse(JSON.stringify(value)) as T }, sentAt: new Date().toISOString() }) }
 }

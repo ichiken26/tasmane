@@ -1,13 +1,17 @@
+# Tasmane 内部 Binding 向け REST API
 openapi: 3.1.0
 info:
   title: Tasmane API
-  version: 0.2.0
+  version: 0.3.0
+# 本番 API ベース URL
 servers:
 - url: https://tasmane.kokage-studio.com/api
+# Worker Binding 認証とユーザーコンテキストの必須化
 security:
 - InternalBindingAuth: []
   WorkerUserContext: []
 paths:
+  # タスク検索・作成
   /v1/tasks:
     get:
       operationId: searchTasks
@@ -78,6 +82,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImpactPlan'
+  # タスク取得・更新・削除
   /v1/tasks/{taskId}:
     get:
       operationId: getTask
@@ -133,6 +138,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImpactPlan'
+  # タスク状態遷移
   /v1/tasks/{taskId}/transition:
     post:
       operationId: transitionTask
@@ -176,6 +182,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  # タスク階層プロジェクション
   /v1/tasks/{taskId}/tree:
     get:
       operationId: getTaskTree
@@ -184,6 +191,7 @@ paths:
       responses:
         '200':
           description: Hierarchy projection
+  # タスク依存関係の一覧・追加
   /v1/tasks/{taskId}/dependencies:
     get:
       operationId: listTaskDependencies
@@ -217,6 +225,7 @@ paths:
           description: Added
         '409':
           description: Cycle/genre conflict
+  # タスク依存関係の削除（人間 UI/API のみ）
   /v1/tasks/{taskId}/dependencies/{dependsOnTaskId}:
     delete:
       operationId: removeTaskDependency
@@ -240,6 +249,7 @@ paths:
           description: Removed
         '409':
           description: Version conflict
+  # ユーザー設定の取得・更新
   /v1/settings:
     get:
       operationId: getUserSettings
@@ -267,6 +277,7 @@ paths:
                 $ref: '#/components/schemas/UserSettings'
         '400':
           description: Invalid timezone or interval
+  # タスク確認事項の一覧・作成
   /v1/tasks/{taskId}/confirmations:
     get:
       operationId: listConfirmations
@@ -282,6 +293,7 @@ paths:
       responses:
         '201':
           description: Created
+  # 確認事項の更新
   /v1/confirmations/{confirmationId}:
     patch:
       operationId: updateConfirmation
@@ -290,6 +302,7 @@ paths:
       responses:
         '200':
           description: Updated
+  # ジャンルの一覧・作成
   /v1/genres:
     get:
       operationId: listGenres
@@ -301,6 +314,7 @@ paths:
       responses:
         '201':
           description: Created
+  # ジャンル取得・更新・削除
   /v1/genres/{genreId}:
     get:
       operationId: getGenre
@@ -330,6 +344,7 @@ paths:
           description: Deleted
         '409':
           description: Genre in use
+  # ジャンルへのタスク種別紐付け
   /v1/genres/{genreId}/task-types:
     get:
       operationId: listGenreTaskTypes
@@ -345,6 +360,7 @@ paths:
       responses:
         '204':
           description: Attached
+  # タスク種別の一覧・作成
   /v1/task-types:
     get:
       operationId: listTaskTypes
@@ -356,6 +372,7 @@ paths:
       responses:
         '201':
           description: Created
+  # タスク種別の取得・更新・削除
   /v1/task-types/{taskTypeId}:
     get:
       operationId: getTaskType
@@ -385,12 +402,14 @@ paths:
           description: Deleted
         '409':
           description: In use
+  # ダッシュボードプロジェクション
   /v1/dashboard:
     get:
       operationId: getDashboard
       responses:
         '200':
           description: Dashboard projection
+  # ジャンル別ダッシュボード
   /v1/dashboard/genres/{genreId}:
     get:
       operationId: getGenreDashboard
@@ -399,6 +418,7 @@ paths:
       responses:
         '200':
           description: Genre dashboard projection
+  # Google Tasks 同期のキュー投入
   /v1/google/sync:
     post:
       operationId: triggerGoogleSync
@@ -407,19 +427,305 @@ paths:
           description: Queued
         '409':
           description: Already syncing
+  # Google 同期コンフリクト一覧
   /v1/google/conflicts:
     get:
       operationId: listGoogleConflicts
       responses:
         '200':
           description: Conflicts
+  # Google インポート候補一覧
   /v1/google/import-candidates:
     get:
       operationId: listGoogleImportCandidates
       responses:
         '200':
           description: Candidates
+  # 葉タスク進捗の更新（進行中の葉のみ 0..95・5刻み）
+  /v1/tasks/{taskId}/progress:
+    put:
+      operationId: setTaskProgress
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - progress
+              - expectedVersion
+              properties:
+                progress:
+                  type: integer
+                  minimum: 0
+                  maximum: 95
+                  multipleOf: 5
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '409':
+          description: Version conflict
+        '422':
+          description: Not an in-progress leaf task or invalid step
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  # 復元可能（30日以内）な削除済みタスク
+  # タスクに紐づくメモアプリのメモ（リンク）
+  /v1/tasks/{taskId}/memo-links:
+    get:
+      operationId: listTaskMemoLinks
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MemoLink'
+    post:
+      operationId: addTaskMemoLink
+      description: Links a memo URL to the task. The same URL is not duplicated; its title is updated instead.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  description: Absolute https URL (http only for localhost)
+                title:
+                  type: string
+                  maxLength: 200
+      responses:
+        '201':
+          description: Linked (or title updated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoLink'
+        '422':
+          description: Invalid URL
+  /v1/tasks/{taskId}/memo-links/{linkId}:
+    delete:
+      operationId: deleteTaskMemoLink
+      description: Unlinks the memo from the task (the memo itself is kept). Human Web UI/API only. Never expose as MCP/WebMCP tool.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      - in: path
+        name: linkId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Unlinked
+  /v1/deleted-tasks:
+    get:
+      operationId: listDeletedTasks
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeletedTask'
+  # 削除済みタスクの復元（同一削除操作の集合ごと。Google側は新規作成し再紐付け）
+  /v1/deleted-tasks/{taskId}/restore:
+    post:
+      operationId: restoreTask
+      description: Human Web UI/API only.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - restoredTaskIds
+                properties:
+                  restoredTaskIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+        '409':
+          description: Genre deleted
+        '422':
+          description: Parent task is completed
+  # 確認先プリセット（ユーザー個人）
+  /v1/confirmation-targets:
+    get:
+      operationId: listConfirmationTargets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConfirmationTarget'
+    post:
+      operationId: createConfirmationTarget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmationTarget'
+        '409':
+          description: Duplicate name (case-insensitive)
+  /v1/confirmation-targets/{targetId}:
+    delete:
+      operationId: deleteConfirmationTarget
+      description: Human Web UI/API only. Never expose as MCP/WebMCP tool.
+      parameters:
+      - in: path
+        name: targetId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Deleted
+  # ジャンルからのタスク種別解除（使用中は禁止）
+  /v1/genres/{genreId}/task-types/{taskTypeId}:
+    delete:
+      operationId: detachGenreTaskType
+      description: Human Web UI/API only. Never expose as MCP/WebMCP tool.
+      parameters:
+      - $ref: '#/components/parameters/GenreId'
+      - $ref: '#/components/parameters/TaskTypeId'
+      responses:
+        '204':
+          description: Detached
+        '409':
+          description: In use by tasks of the genre
+  # Google 連携の同期状態
+  /v1/google/status:
+    get:
+      operationId: getGoogleSyncStatus
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleSyncStatus'
+  # 専用 Task List の作り直し（Google 側で削除された場合の復旧）
+  /v1/google/task-list/recreate:
+    post:
+      operationId: recreateGoogleTaskList
+      description: Drops all Google links, creates a new dedicated list and re-creates every active task in it.
+      responses:
+        '202':
+          description: Queued
+  # Google 同期コンフリクトの解決
+  /v1/google/conflicts/{taskId}/resolve:
+    post:
+      operationId: resolveGoogleConflict
+      description: >-
+        KEEP_TASMANE pushes Tasmane values to Google (adopt Google values by updating the task first).
+        RECREATE_GOOGLE recreates a task deleted on Google. UNLINK keeps the task and stops syncing it.
+        "Delete in Tasmane" uses deleteTask.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - resolution
+              properties:
+                resolution:
+                  type: string
+                  enum:
+                  - KEEP_TASMANE
+                  - RECREATE_GOOGLE
+                  - UNLINK
+      responses:
+        '204':
+          description: Resolved
+        '404':
+          description: No such conflict
+  # Google-only Task の取込（ユーザーが Genre を選択）
+  /v1/google/import-candidates/import:
+    post:
+      operationId: importGoogleCandidate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - googleTaskListId
+              - googleTaskId
+              - genreId
+              properties:
+                googleTaskListId:
+                  type: string
+                googleTaskId:
+                  type: string
+                genreId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '409':
+          description: Already imported
 components:
+  # Worker Binding 認証スキーム
   securitySchemes:
     InternalBindingAuth:
       type: apiKey
@@ -431,6 +737,7 @@ components:
       in: header
       name: X-Tasmane-Authenticated-User
       description: Authenticated identity injected by the trusted Worker; public clients cannot set it.
+  # パスパラメータ定義
   parameters:
     TaskId:
       in: path
@@ -460,25 +767,30 @@ components:
       schema:
         type: string
         format: uuid
+  # 共通スキーマ
   schemas:
+    # タスク状態
     TaskStatus:
       type: string
       enum:
       - NOT_STARTED
       - IN_PROGRESS
       - COMPLETED
+    # 優先度
     Priority:
       type: string
       enum:
       - LOW
       - MEDIUM
       - HIGH
+    # 確認事項ステータス
     ConfirmationStatus:
       type: string
       enum:
       - UNCONFIRMED
       - CHECKING
       - CONFIRMED
+    # 影響対象エンティティ
     ImpactEntity:
       type: object
       required:
@@ -498,6 +810,7 @@ components:
           type:
           - string
           - 'null'
+    # 影響確認プラン
     ImpactPlan:
       type: object
       required:
@@ -519,6 +832,7 @@ components:
           type: array
           items:
             type: string
+    # タスク本体
     Task:
       type: object
       required:
@@ -583,6 +897,28 @@ components:
         version:
           type: integer
           minimum: 1
+        taskScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Internal recommendation score (not shown as a number in UI).
+        recommendationReasons:
+          type: array
+          items:
+            type: string
+        recommended:
+          type: boolean
+        canComplete:
+          type: boolean
+          description: IN_PROGRESS and no incomplete descendants / unresolved confirmations.
+        isLeaf:
+          type: boolean
+        warnings:
+          type: array
+          description: Non-blocking dependency schedule warnings (update responses only).
+          items:
+            type: string
+    # タスク作成リクエスト
     CreateTaskRequest:
       type: object
       required:
@@ -630,6 +966,7 @@ components:
           type:
           - string
           - 'null'
+    # タスク部分更新リクエスト
     PatchTaskRequest:
       type: object
       required:
@@ -678,6 +1015,7 @@ components:
           type:
           - string
           - 'null'
+    # ジャンル
     Genre:
       type: object
       required:
@@ -689,6 +1027,7 @@ components:
           format: uuid
         name:
           type: string
+    # タスク種別
     TaskType:
       type: object
       required:
@@ -700,6 +1039,7 @@ components:
           format: uuid
         name:
           type: string
+    # 確認事項
     Confirmation:
       type: object
       required:
@@ -726,11 +1066,13 @@ components:
           - string
           - 'null'
           format: date-time
+    # ユーザー設定
     UserSettings:
       type: object
       required:
       - timezone
       - googleSyncIntervalMinutes
+      - memoIntegrationEnabled
       properties:
         timezone:
           type: string
@@ -739,6 +1081,130 @@ components:
           type: integer
           minimum: 1
           maximum: 1440
+        memoIntegrationEnabled:
+          type: boolean
+          description: Show the memo app (memo.kokage-studio.com) embedded in task screens
+    # 削除済みタスク
+    DeletedTask:
+      type: object
+      required:
+      - id
+      - genreId
+      - title
+      - status
+      - deletedAt
+      - purgeAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        genreId:
+          type: string
+          format: uuid
+        parentTaskId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        endAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+        purgeAt:
+          type: string
+          format: date-time
+    # 確認先プリセット
+    # タスクに紐づくメモ（メモアプリ連携）
+    MemoLink:
+      type: object
+      required:
+      - id
+      - taskId
+      - url
+      - title
+      - memoDate
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        title:
+          type: string
+          description: Display name of the memo (for memo-app memos, the name without the memo-yyyymmdd- ID prefix).
+        memoDate:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: Date embedded in the memo-app memo ID (memo-yyyymmdd-...), or null when the URL has none.
+        createdAt:
+          type: string
+          format: date-time
+    ConfirmationTarget:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    # Google 連携の同期状態
+    GoogleSyncStatus:
+      type: object
+      required:
+      - connected
+      - conflictCount
+      - pendingJobs
+      - failed
+      properties:
+        connected:
+          type: boolean
+        taskListMissing:
+          type: boolean
+          description: The dedicated Google Task List was deleted; user must recreate it.
+        lastSyncFinishedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        conflictCount:
+          type: integer
+        pendingJobs:
+          type: integer
+        failed:
+          type: array
+          items:
+            type: object
+            required:
+            - taskId
+            - title
+            - message
+            properties:
+              taskId:
+                type: string
+                format: uuid
+              title:
+                type: string
+              message:
+                type: string
+    # エラー応答
     Error:
       type: object
       required:
