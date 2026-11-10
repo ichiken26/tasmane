@@ -21,8 +21,9 @@ export async function fetchGoAPI(event: H3Event, path: string, init: RequestInit
   if (service) {
     try {
       return await service.fetch(new URL(path, VPC_SERVICE_ORIGIN), init)
-    } catch {
+    } catch (error) {
       // Tunnel 断・自宅サーバー停止時（VPC Service の fetch は接続不能で例外）
+      console.error('Tasmane API is unreachable via VPC Service', { path, error: error instanceof Error ? error.message : String(error) })
       throw createError({ statusCode: 503, statusMessage: 'Tasmane API is unreachable' })
     }
   }

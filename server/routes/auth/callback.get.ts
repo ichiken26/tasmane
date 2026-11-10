@@ -42,8 +42,11 @@ export default defineEventHandler(async (event) => {
     }),
   })
   const tokens = await tokenResponse.json() as GoogleTokenResponse
-  if (!tokenResponse.ok || tokens.error || !tokens.id_token)
+  if (!tokenResponse.ok || tokens.error || !tokens.id_token) {
+    // 原因調査用（トークンや個人情報は出さない）
+    console.error('auth callback: Google token exchange failed', { status: tokenResponse.status, error: tokens.error ?? null, hasIdToken: Boolean(tokens.id_token) })
     throw createError({ statusCode: 502, statusMessage: 'Google token exchange failed' })
+  }
   // ID トークン検証と内部ブートストラップ
   const identity = await verifyGoogleIDToken(tokens.id_token, {
     audience: config.googleClientId,
@@ -67,7 +70,10 @@ export default defineEventHandler(async (event) => {
     headers: trustedProxyHeaders(new Headers({ 'content-type': 'application/json' }), 'oauth-bootstrap', config.internalBindingSecret),
     body: bootstrapBody,
   }, config.apiInternalUrl)
-  if (!bootstrap.ok) throw createError({ statusCode: 502, statusMessage: 'User provisioning failed' })
+  if (!bootstrap.ok) {
+    console.error('auth callback: user provisioning failed', { status: bootstrap.status, body: (await bootstrap.text().catch(() => '')).slice(0, 200) })
+    throw createError({ statusCode: 502, statusMessage: 'User provisioning failed' })
+  }
   const provisioned = await bootstrap.json() as BootstrapResponse
   if (!provisioned.userId) throw createError({ statusCode: 502, statusMessage: 'User provisioning returned no identity' })
 

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -58,6 +59,7 @@ func newAuthBootstrapHandler(store authBootstrapStore, bindingSecret string) htt
 		validBinding := bindingSecret != "" && len(provided) == len(bindingSecret) &&
 			subtle.ConstantTimeCompare([]byte(provided), []byte(bindingSecret)) == 1
 		if !validBinding {
+			log.Printf("auth bootstrap: rejected request with invalid binding secret")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -71,12 +73,14 @@ func newAuthBootstrapHandler(store authBootstrapStore, bindingSecret string) htt
 		decoder.DisallowUnknownFields()
 		var input authBootstrapRequest
 		if err := decoder.Decode(&input); err != nil || !validBootstrapIdentity(input) {
+			log.Printf("auth bootstrap: invalid request (decode error: %v)", err)
 			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid identity")
 			return
 		}
 		// ユーザープロビジョニングの呼び出し
 		userID, err := store.Bootstrap(r.Context(), input)
 		if err != nil {
+			log.Printf("auth bootstrap: user provisioning failed: %v", err)
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "user provisioning failed")
 			return
 		}
