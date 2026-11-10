@@ -38,24 +38,17 @@ Frontend開発は`npm run dev`、本番相当ビルドは`npm run build`。`veri
 
 Nuxt/Nitro Workerが唯一の公開入口となり、Google Authorization Code + PKCEでログインする。OAuth transactionと7日間のlogin sessionはAES-GCMで暗号化・改ざん検知した`HttpOnly; Secure; SameSite=Lax; Path=/`の`__Host-` Cookieへ保存され、Google tokenや内部Binding secretをBrowserへ返さない。`POST /auth/logout`は同一Originのみ受理する。
 
-Worker Secretとして次を設定する（値を`wrangler.jsonc`やGitへ書かない）。
+Worker Secret は `secrets/worker.env`（Git 管理外。`secrets/worker.env.example` 参照）に置き、`cf deploy --prebuilt --secrets-file secrets/worker.env`（`npm run deploy:worker`）で Worker のバージョンと同時に投入する。
 
-```bash
-npx wrangler secret put NUXT_GOOGLE_CLIENT_ID
-npx wrangler secret put NUXT_GOOGLE_CLIENT_SECRET
-npx wrangler secret put NUXT_GOOGLE_REDIRECT_URI
-npx wrangler secret put NUXT_SESSION_SECRET
-npx wrangler secret put NUXT_INTERNAL_BINDING_SECRET
-```
+- `NUXT_GOOGLE_CLIENT_ID` / `NUXT_GOOGLE_CLIENT_SECRET` / `NUXT_GOOGLE_REDIRECT_URI`
+- `NUXT_SESSION_SECRET`: 32文字以上。session/OAuth Cookie暗号化用
+- `NUXT_INTERNAL_BINDING_SECRET`: 32文字以上。自宅サーバーの `TASMANE_INTERNAL_BINDING_SECRET` と同値
+- `NUXT_ALLOWED_EMAILS`: ログインを許可する Google アカウント（カンマ区切り）
+- `TASMANE_API`: `cloudflare.config.ts` で定義する Workers VPC Service binding（Cloudflare Tunnel 経由で自宅サーバーの Go API へ）。local開発だけは`NUXT_API_INTERNAL_URL=http://127.0.0.1:8080`へfallbackする
 
-- `NUXT_GOOGLE_REDIRECT_URI`: Google Consoleへ完全一致で登録した`https://tasmane.kokage-studio.com/auth/callback`
-- `NUXT_SESSION_SECRET`: 32文字以上の独立したrandom secret
-- `NUXT_INTERNAL_BINDING_SECRET`: 32文字以上でGo側`TASMANE_INTERNAL_BINDING_SECRET`と同一
-- `TASMANE_API`: `wrangler.jsonc`で定義する非公開Go APIへのCloudflare Service Binding。local開発だけは`NUXT_API_INTERNAL_URL=http://127.0.0.1:8080`へfallbackする
+Browserの`/api/v1/**` requestはsession認証（状態変更は同一Originのみ）後にWorkerがVPC Service bindingへ転送する。その際、client由来の全`X-Tasmane-*`およびforwarding headerを除去し、検証済みuser UUIDと内部Binding secretだけを注入する。OAuth callbackは検証済みGoogle subject/profileとrefresh tokenを内部専用`POST /internal/auth/bootstrap`へ送り、Go側でuserをupsertしrefresh tokenをAES-256-GCM暗号化してNeonへ保存する。
 
-Browserの`/v1/**` requestはsession認証後にWorkerがBindingへ転送する。その際、client由来の全`X-Tasmane-*`およびforwarding headerを除去し、検証済みuser UUIDと内部Binding secretだけを注入する。OAuth callbackは検証済みGoogle subject/profileとrefresh tokenを内部専用`POST /internal/auth/bootstrap`へ送り、Go側でuserをupsertしrefresh tokenをAES-256-GCM暗号化してNeonへ保存する。
-
-APIは `127.0.0.1:8080` のみで待受ける。Cloudflare Worker Bindingから `X-Tasmane-Internal-Binding` と、OAuth検証後の `X-Tasmane-Authenticated-User` を注入する。BrowserからGoコンテナを直接公開しない。クライアント指定の `userId` は拒否される。
+自宅サーバーでは API は Docker 内部の tunnel ネットワークとホストの `127.0.0.1:8080` のみで待受ける。Worker（VPC Service binding）から `X-Tasmane-Internal-Binding` と、OAuth検証後の `X-Tasmane-Authenticated-User` を注入する。BrowserからGoコンテナを直接公開しない。クライアント指定の `userId` は拒否される。
 
 状態遷移例:
 
@@ -67,7 +60,7 @@ curl -X POST http://127.0.0.1:8080/v1/tasks/TASK_ID/transition \
   -d '{"toStatus":"IN_PROGRESS","expectedVersion":1}'
 ```
 
-本番ではBinding secretをCloudflare Secretで管理し、ログやBrowserへ出さない。更新は必ず最新 `version` を `expectedVersion` として送り、409時は最新Taskを再取得してユーザー変更を再適用する。
+本番ではBinding secretをWorker Secretと自宅サーバーの `.env` で管理し、ログやBrowserへ出さない。更新は必ず最新 `version` を `expectedVersion` として送り、409時は最新Taskを再取得してユーザー変更を再適用する。
 
 ## Migrationと運用
 
@@ -85,24 +78,25 @@ Dockerやsystem-wide installなしのfresh PostgreSQL検証は `./scripts/test-p
 ## 想定構成
 
 - Frontend: Nuxt / Cloudflare Workers
-- API: Go + chi（非公開。Tunnel または Cloudflare Containers）
+- API: Go + chi（自宅サーバー。Cloudflare Tunnel + Workers VPC Service 経由のみ・非公開）
 - DB: Neon PostgreSQL
-- Queue: PostgreSQL durable queue（Google同期。Cloudflare Queues schemaは将来互換用）
+- Queue: PostgreSQL durable queue（Google同期）
+- Cloudflare CLI: `cf`（Worker のビルドは `scripts/cf-build.sh` → `cf deploy --prebuilt`）
 - AI: Gemini API（`cmd/advice-scheduler`）
 - Root: `https://tasmane.kokage-studio.com`
-- API: `https://tasmane.kokage-studio.com/api/v1/*`（互換で `/v1/*` も可）
+- API: `https://tasmane.kokage-studio.com/api/v1/*`
 
 ## 本番リリース
 
-手順の正本は [`docs/PRODUCTION.md`](docs/PRODUCTION.md)。
+手順の正本は [`docs/OPERATIONS.md`](docs/OPERATIONS.md)（要約: [`docs/PRODUCTION.md`](docs/PRODUCTION.md)、現行仕様: [`docs/SYSTEM_SPEC.md`](docs/SYSTEM_SPEC.md)）。
 
 最短コマンド:
 
 ```bash
-cp .env.example .env   # 値を埋める
-bash scripts/gen-secrets.sh
-bash scripts/deploy-go.sh
-bash scripts/deploy-worker.sh
+bash scripts/gen-secrets.sh            # .env / secrets/worker.env 用の値
+npm run setup:cloudflare               # cf で Tunnel・VPC Service 作成（初回）
+cp .env.example .env && npm run deploy:go          # 自宅サーバー
+TASMANE_API_VPC_SERVICE_ID=… npm run deploy:worker # 作業PC / CI
 # 日次: bash scripts/run-cleanup.sh
 ```
 

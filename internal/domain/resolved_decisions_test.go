@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// ジャンル移動の部分木と境界依存の検証
 func TestOD001GenreMoveIncludesSubtreeAndBoundaryDependencies(t *testing.T) {
 	tasks := []GraphTask{
 		{ID: "root", UserID: "u", GenreID: "old"},
@@ -29,6 +30,7 @@ func TestOD001GenreMoveIncludesSubtreeAndBoundaryDependencies(t *testing.T) {
 	}
 }
 
+// Google期限更新の祖先伝播拒否検証
 func TestOD002GoogleDueRejectsAncestorPropagation(t *testing.T) {
 	d5, d10, d12 := day(5), day(10), day(12)
 	tasks := []DateTask{
@@ -44,6 +46,7 @@ func TestOD002GoogleDueRejectsAncestorPropagation(t *testing.T) {
 	}
 }
 
+// 不正階層のループなし拒否検証
 func TestOD002GoogleDueRejectsMalformedHierarchyWithoutLooping(t *testing.T) {
 	d5 := day(5)
 	tasks := []DateTask{
@@ -55,6 +58,7 @@ func TestOD002GoogleDueRejectsMalformedHierarchyWithoutLooping(t *testing.T) {
 	}
 }
 
+// 専用タスクリストの作成と再利用検証
 func TestOD003DedicatedGoogleTaskListCreateAndReuse(t *testing.T) {
 	create := PlanDedicatedGoogleTaskList("", false)
 	if create.Action != CreateGoogleTaskList || create.Name != DedicatedGoogleTaskListName {
@@ -70,6 +74,7 @@ func TestOD003DedicatedGoogleTaskListCreateAndReuse(t *testing.T) {
 	}
 }
 
+// リーフから親への変換確認と進捗クリア検証
 func TestOD006LeafToParentRequiresConfirmationAndClearsProgress(t *testing.T) {
 	leaf := Task{ID: "leaf", Status: InProgress, Progress: intPointer(40)}
 	plan, err := PlanFirstChildAddition(leaf)
@@ -81,6 +86,7 @@ func TestOD006LeafToParentRequiresConfirmationAndClearsProgress(t *testing.T) {
 	}
 }
 
+// 削除影響の子孫と再帰的依存先包含検証
 func TestOD007DeleteImpactIncludesDescendantsAndRecursiveDependents(t *testing.T) {
 	tasks := []GraphTask{
 		{ID: "target", UserID: "u", GenreID: "g"},

@@ -1,5 +1,7 @@
 BEGIN;
+-- UUIDv7 の RFC 9562 variant 制約への置換
 
+-- 既存版制約の削除と variant 制約の再付与
 DO $$
 DECLARE
   table_name text;

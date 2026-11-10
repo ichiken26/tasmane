@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// 階層割当の境界と循環検証
 func TestValidateHierarchyAssignment(t *testing.T) {
 	nodes := []GraphTask{
 		{ID: "root", UserID: "u1", GenreID: "g1"},
@@ -35,6 +36,7 @@ func TestValidateHierarchyAssignment(t *testing.T) {
 	}
 }
 
+// 不正タスク集合のグラフ検証拒否
 func TestGraphValidationRejectsMalformedTaskSets(t *testing.T) {
 	duplicate := []GraphTask{{ID: "a", UserID: "u", GenreID: "g"}, {ID: "a", UserID: "u", GenreID: "g"}}
 	if err := ValidateHierarchyAssignment(duplicate, "a", ""); !errors.Is(err, ErrInvalidGraphInput) {
@@ -46,6 +48,7 @@ func TestGraphValidationRejectsMalformedTaskSets(t *testing.T) {
 	}
 }
 
+// 依存追加の境界と循環検証
 func TestValidateDependencyAddition(t *testing.T) {
 	tasks := []GraphTask{
 		{ID: "a", UserID: "u1", GenreID: "g1"},
@@ -75,6 +78,7 @@ func TestValidateDependencyAddition(t *testing.T) {
 	}
 }
 
+// 不正既存辺の依存検証拒否
 func TestDependencyValidationRejectsMalformedExistingEdges(t *testing.T) {
 	tasks := []GraphTask{
 		{ID: "a", UserID: "u1", GenreID: "g1"},

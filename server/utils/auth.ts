@@ -25,10 +25,12 @@ export interface SessionIdentity {
 
 const cookieBase = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/' }
 
+// OAuth トランザクション Cookie の発行
 export async function setOAuthTransaction(event: H3Event, value: OAuthTransaction, secret: string): Promise<void> {
   setCookie(event, OAUTH_COOKIE, await seal(value, secret), { ...cookieBase, maxAge: 600 })
 }
 
+// 消費型 OAuth トランザクション Cookie の取得
 export async function takeOAuthTransaction(event: H3Event, secret: string): Promise<OAuthTransaction | null> {
   const cookie = getCookie(event, OAUTH_COOKIE)
   deleteCookie(event, OAUTH_COOKIE, cookieBase)
@@ -38,14 +40,17 @@ export async function takeOAuthTransaction(event: H3Event, secret: string): Prom
   return value
 }
 
+// セッション Cookie の発行
 export async function setSession(event: H3Event, value: SessionIdentity, secret: string): Promise<void> {
   setCookie(event, SESSION_COOKIE, await seal(value, secret), { ...cookieBase, maxAge: 60 * 60 * 24 * 7 })
 }
 
+// セッション Cookie の削除
 export function clearAuthSession(event: H3Event): void {
   deleteCookie(event, SESSION_COOKIE, cookieBase)
 }
 
+// 有効セッションの必須取得
 export async function requireSession(event: H3Event, secret: string): Promise<SessionIdentity> {
   const cookie = getCookie(event, SESSION_COOKIE)
   if (!cookie) throw createError({ statusCode: 401, statusMessage: 'Authentication required' })
@@ -57,6 +62,7 @@ export async function requireSession(event: H3Event, secret: string): Promise<Se
   return session
 }
 
+// オープンリダイレクト防止の相対パス正規化
 export function safeReturnTo(input: unknown): string {
   if (typeof input !== 'string' || !input.startsWith('/') || input.startsWith('//') || input.includes('\\')) return '/'
   return input

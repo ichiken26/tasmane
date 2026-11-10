@@ -10,13 +10,16 @@ import (
 	"tasmane/internal/identifier"
 )
 
+// UUID生成器の契約
 type IDGenerator interface{ New() (string, error) }
 
+// Postgres永続化アダプタ
 type Postgres struct {
 	database *sql.DB
 	ids      IDGenerator
 }
 
+// Postgresリポジトリの生成
 func NewPostgres(database *sql.DB, ids IDGenerator) *Postgres {
 	if ids == nil {
 		ids = identifier.NewUUIDv7Generator()
@@ -48,6 +51,7 @@ SELECT t.id, t.user_id, t.genre_id, t.task_type_id, t.parent_task_id,
 FROM tasks t
 WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NULL`
 
+// タスク詳細の取得
 func (p *Postgres) Get(ctx context.Context, userID, taskID string) (domain.Task, error) {
 	if p == nil || p.database == nil || userID == "" || taskID == "" {
 		return domain.Task{}, domain.ErrForbidden
@@ -57,12 +61,14 @@ func (p *Postgres) Get(ctx context.Context, userID, taskID string) (domain.Task,
 	var progress sql.NullInt64
 	var taskTypeID, parentTaskID, body, manualPriority sql.NullString
 	var startAt, endAt sql.NullTime
+	// タスク行のスキャン
 	err := p.database.QueryRowContext(ctx, taskGetSQL, taskID, userID).Scan(
 		&task.ID, &task.UserID, &task.GenreID, &taskTypeID, &parentTaskID,
 		&task.Title, &body, &status, &progress, &startAt, &endAt,
 		&task.IsAllDay, &manualPriority, &task.Version, &task.CreatedAt, &task.HasChildren,
 		&task.IncompleteDescendants, &task.UnresolvedConfirmations,
 	)
+	// 未存在時の禁止エラー変換
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Task{}, domain.ErrForbidden
 	}
@@ -110,10 +116,12 @@ SET status = $1, leaf_progress = $2, version = version + 1
 WHERE id = $3 AND user_id = $4 AND version = $5 AND deleted_at IS NULL
 RETURNING version`
 
+// タスク状態の楽観更新
 func (p *Postgres) UpdateStatus(ctx context.Context, task domain.Task, expected int64, via string) (domain.Task, error) {
 	if p == nil || p.database == nil || p.ids == nil || task.ID == "" || task.UserID == "" || expected < 1 || !validChangeVia(via) {
 		return domain.Task{}, domain.ErrForbidden
 	}
+	// トランザクション開始
 	tx, err := p.database.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Task{}, fmt.Errorf("begin task update: %w", err)
@@ -124,8 +132,10 @@ func (p *Postgres) UpdateStatus(ctx context.Context, task domain.Task, expected 
 	var currentProgress sql.NullInt64
 	var currentVersion int64
 	var hasChildren bool
+	// 対象行のロック取得
 	err = tx.QueryRowContext(ctx, taskForUpdateSQL, task.ID, task.UserID).
 		Scan(&currentStatus, &currentProgress, &currentVersion, &hasChildren)
+	// 未存在時の禁止エラー変換
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Task{}, domain.ErrForbidden
 	}
@@ -142,7 +152,9 @@ func (p *Postgres) UpdateStatus(ctx context.Context, task domain.Task, expected 
 	if task.Progress != nil {
 		progress = *task.Progress
 	}
+	// 状態更新の実行
 	if err := tx.QueryRowContext(ctx, taskUpdateSQL, task.Status, progress, task.ID, task.UserID, expected).Scan(&task.Version); err != nil {
+		// 版衝突へのエラー変換
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Task{}, domain.ErrVersionConflict
 		}
@@ -163,17 +175,20 @@ func (p *Postgres) UpdateStatus(ctx context.Context, task domain.Task, expected 
 			return domain.Task{}, err
 		}
 	}
+	// 状態更新の確定
 	if err := tx.Commit(); err != nil {
 		return domain.Task{}, fmt.Errorf("commit task update: %w", err)
 	}
 	return task, nil
 }
 
+// 状態履歴の挿入
 func (p *Postgres) insertStatusHistory(ctx context.Context, tx *sql.Tx, task domain.Task, from domain.Status, via string) error {
 	id, err := p.ids.New()
 	if err != nil {
 		return fmt.Errorf("generate status history id: %w", err)
 	}
+	// 履歴行の挿入
 	_, err = tx.ExecContext(ctx, `INSERT INTO task_status_histories
     (id, user_id, task_id, from_status, to_status, changed_by_user_id, changed_via)
     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -184,6 +199,7 @@ func (p *Postgres) insertStatusHistory(ctx context.Context, tx *sql.Tx, task dom
 	return nil
 }
 
+// 進捗履歴の挿入
 func (p *Postgres) insertProgressHistory(ctx context.Context, tx *sql.Tx, task domain.Task, from sql.NullInt64, via string) error {
 	id, err := p.ids.New()
 	if err != nil {
@@ -196,6 +212,7 @@ func (p *Postgres) insertProgressHistory(ctx context.Context, tx *sql.Tx, task d
 	if task.Progress != nil {
 		toValue = *task.Progress
 	}
+	// 履歴行の挿入
 	_, err = tx.ExecContext(ctx, `INSERT INTO task_progress_histories
     (id, user_id, task_id, from_progress, to_progress, changed_by_user_id, changed_via)
     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -206,6 +223,7 @@ func (p *Postgres) insertProgressHistory(ctx context.Context, tx *sql.Tx, task d
 	return nil
 }
 
+// 進捗NULL比較
 func sameNullableProgress(current sql.NullInt64, next *int) bool {
 	if !current.Valid || next == nil {
 		return !current.Valid && next == nil
@@ -213,6 +231,7 @@ func sameNullableProgress(current sql.NullInt64, next *int) bool {
 	return int(current.Int64) == *next
 }
 
+// 変更経路の検証
 func validChangeVia(value string) bool {
 	switch value {
 	case "WEB", "MCP", "WEB_MCP", "SYSTEM", "GOOGLE_TASKS":

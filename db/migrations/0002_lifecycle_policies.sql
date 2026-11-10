@@ -1,5 +1,7 @@
 BEGIN;
+-- 更新日時トリガと UUIDv7 制約の追加
 
+-- updated_at 自動更新関数の定義
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -10,6 +12,7 @@ BEGIN
 END;
 $$;
 
+-- 対象テーブルへの更新トリガ付与
 DO $$
 DECLARE
   table_name text;
@@ -28,6 +31,7 @@ BEGIN
 END;
 $$;
 
+-- 主キーの UUIDv7 版ビット制約
 ALTER TABLE users ADD CONSTRAINT users_id_uuid_v7 CHECK (substring(id::text, 15, 1) = '7');
 ALTER TABLE genres ADD CONSTRAINT genres_id_uuid_v7 CHECK (substring(id::text, 15, 1) = '7');
 ALTER TABLE task_types ADD CONSTRAINT task_types_id_uuid_v7 CHECK (substring(id::text, 15, 1) = '7');

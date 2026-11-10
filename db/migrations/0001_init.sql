@@ -1,5 +1,7 @@
 BEGIN;
+-- 初期スキーマと列挙型・主要テーブルの定義
 
+-- 拡張と列挙型の導入
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS citext;
 
@@ -9,6 +11,7 @@ CREATE TYPE confirmation_status AS ENUM ('UNCONFIRMED','CHECKING','CONFIRMED');
 CREATE TYPE sync_status AS ENUM ('SYNCED','PENDING','SYNCING','FAILED','CONFLICT');
 CREATE TYPE change_via AS ENUM ('WEB','MCP','WEB_MCP','SYSTEM','GOOGLE_TASKS');
 
+-- ユーザとサーバ設定テーブルの定義
 CREATE TABLE users (
   id uuid PRIMARY KEY,
   google_subject text NOT NULL UNIQUE,
@@ -20,6 +23,7 @@ CREATE TABLE users (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- ユーザ単位のサーバ設定テーブルの定義
 CREATE TABLE user_server_settings (
   user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   google_sync_interval_minutes integer NOT NULL DEFAULT 10
@@ -28,6 +32,7 @@ CREATE TABLE user_server_settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- ジャンルとタスク種別の定義
 CREATE TABLE genres (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -40,6 +45,7 @@ CREATE TABLE genres (
   UNIQUE (user_id, normalized_name)
 );
 
+-- タスク種別テーブルの定義
 CREATE TABLE task_types (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -52,6 +58,7 @@ CREATE TABLE task_types (
   UNIQUE (user_id, normalized_name)
 );
 
+-- ジャンルとタスク種別の紐付けテーブルの定義
 CREATE TABLE genre_task_types (
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   genre_id uuid NOT NULL,
@@ -63,6 +70,7 @@ CREATE TABLE genre_task_types (
   UNIQUE (genre_id, task_type_id, user_id)
 );
 
+-- タスク本体の定義
 CREATE TABLE tasks (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -113,16 +121,12 @@ CREATE TABLE tasks (
   )
 );
 
--- leaf_progress is authoritative ONLY while a task is a Leaf.
+-- Leaf 時のみ leaf_progress を権威値とし Parent は派生かつ NULL 固定
 -- Parent progress is always derived and leaf_progress must be NULL for Parent tasks.
--- Whether the task is currently a Leaf depends on child existence, therefore the
--- remaining Leaf-vs-Parent invariant is enforced transactionally in the Domain layer.
+-- Leaf/Parent 判定は子の有無依存のためドメイン層トランザクションで担保
+-- Parent の leaf_progress を権威とせず状態は永続し将来の列分割は任意
 
--- NOTE:
--- Parent progress is calculated, but tasks.leaf_progress must not be treated
--- as authoritative for parent nodes by application code. Parent status is persisted.
--- If desired, a future migration can split leaf_progress from a generic task table.
-
+-- タスク依存関係テーブルの定義
 CREATE TABLE task_dependencies (
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   genre_id uuid NOT NULL,
@@ -137,6 +141,7 @@ CREATE TABLE task_dependencies (
   CHECK (task_id <> depends_on_task_id)
 );
 
+-- 確認対象と確認レコードの定義
 CREATE TABLE confirmation_targets (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -147,6 +152,7 @@ CREATE TABLE confirmation_targets (
   UNIQUE (user_id, normalized_name)
 );
 
+-- タスク確認レコードの定義
 CREATE TABLE task_confirmations (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -167,6 +173,7 @@ CREATE TABLE task_confirmations (
   )
 );
 
+-- 状態・進捗履歴テーブルの定義
 CREATE TABLE task_status_histories (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -182,6 +189,7 @@ CREATE TABLE task_status_histories (
     REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- 進捗履歴テーブルの定義
 CREATE TABLE task_progress_histories (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -197,6 +205,7 @@ CREATE TABLE task_progress_histories (
     REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- AI 助言テーブルの定義
 CREATE TABLE ai_advices (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -210,6 +219,7 @@ CREATE TABLE ai_advices (
     REFERENCES genres(id, user_id) ON DELETE CASCADE
 );
 
+-- Google 連携テーブルの定義
 CREATE TABLE google_integrations (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -225,6 +235,7 @@ CREATE TABLE google_integrations (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Google Tasks 同期状態テーブルの定義
 CREATE TABLE google_task_syncs (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -245,6 +256,7 @@ CREATE TABLE google_task_syncs (
     REFERENCES tasks(id, user_id) ON DELETE CASCADE
 );
 
+-- 検索・同期用インデックスの定義
 CREATE INDEX idx_tasks_user_status ON tasks(user_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX idx_tasks_user_end ON tasks(user_id, end_at) WHERE deleted_at IS NULL;
 CREATE INDEX idx_tasks_parent ON tasks(parent_task_id) WHERE deleted_at IS NULL;

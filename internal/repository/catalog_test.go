@@ -10,6 +10,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// ジャンル名トリムと所有者スコープの検証
 func TestPostgresGenreCreateTrimsNameAndScopesOwner(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -28,6 +29,7 @@ func TestPostgresGenreCreateTrimsNameAndScopesOwner(t *testing.T) {
 	}
 }
 
+// 利用中ジャンル削除のロールバック
 func TestPostgresGenreDeleteRejectsInUseAndRollsBack(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -49,6 +51,7 @@ func TestPostgresGenreDeleteRejectsInUseAndRollsBack(t *testing.T) {
 	}
 }
 
+// 未使用ジャンルの論理削除
 func TestPostgresGenreDeleteSoftDeletesUnusedGenre(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -72,6 +75,7 @@ func TestPostgresGenreDeleteSoftDeletesUnusedGenre(t *testing.T) {
 	}
 }
 
+// 空ジャンル名の拒否
 func TestPostgresGenreRejectsBlankName(t *testing.T) {
 	database, _, err := sqlmock.New()
 	if err != nil {
@@ -83,6 +87,7 @@ func TestPostgresGenreRejectsBlankName(t *testing.T) {
 	}
 }
 
+// タスク種別作成とテナントスコープ紐付け
 func TestPostgresTaskTypeCreateAndAttachAreTenantScoped(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -106,6 +111,7 @@ func TestPostgresTaskTypeCreateAndAttachAreTenantScoped(t *testing.T) {
 	}
 }
 
+// 利用中タスク種別の紐付け解除拒否
 func TestPostgresTaskTypeDetachRejectsUseByTask(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -127,6 +133,7 @@ func TestPostgresTaskTypeDetachRejectsUseByTask(t *testing.T) {
 	}
 }
 
+// 利用中タスク種別の削除拒否
 func TestPostgresTaskTypeDeleteRejectsUseByTask(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {

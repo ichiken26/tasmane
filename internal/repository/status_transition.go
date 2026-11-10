@@ -38,6 +38,7 @@ UNION ALL SELECT 'ancestor',id,parent_task_id,status,leaf_progress,version,has_c
 UNION ALL SELECT 'descendant',id,parent_task_id,status,leaf_progress,version,has_children,depth FROM descendants
 ORDER BY 1 DESC,8,2`
 
+// 状態遷移計画のプレビュー
 func (p *Postgres) PreviewStatusTransition(ctx context.Context, userID, taskID string, expected int64, to domain.Status) (domain.StatusTransitionPlan, error) {
 	if p == nil || p.database == nil || userID == "" || taskID == "" || expected < 1 {
 		return domain.StatusTransitionPlan{}, domain.ErrForbidden
@@ -49,7 +50,9 @@ type queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+// 状態遷移計画の読取
 func readStatusTransitionPlan(ctx context.Context, query queryer, userID, taskID string, expected int64, to domain.Status) (domain.StatusTransitionPlan, error) {
+	// スナップショットSQLの実行
 	rows, err := query.QueryContext(ctx, statusTransitionSnapshotSQL, taskID, userID)
 	if err != nil {
 		return domain.StatusTransitionPlan{}, fmt.Errorf("read status impact: %w", err)
@@ -65,6 +68,7 @@ func readStatusTransitionPlan(ctx context.Context, query queryer, userID, taskID
 		var version int64
 		var hasChildren bool
 		var depth int
+		// 影響行のスキャン
 		if err := rows.Scan(&kind, &id, &parent, &status, &progress, &version, &hasChildren, &depth); err != nil {
 			return domain.StatusTransitionPlan{}, err
 		}
@@ -97,15 +101,18 @@ func readStatusTransitionPlan(ctx context.Context, query queryer, userID, taskID
 	return domain.PlanStatusTransition(target, ancestors, descendants, to)
 }
 
+// 状態遷移計画の適用
 func (p *Postgres) ApplyStatusTransition(ctx context.Context, userID, taskID string, expected int64, to domain.Status, via string, approved domain.StatusTransitionPlan) (domain.Task, error) {
 	if p == nil || p.database == nil || p.ids == nil || userID == "" || taskID == "" || expected < 1 || !validChangeVia(via) {
 		return domain.Task{}, domain.ErrForbidden
 	}
+	// トランザクション開始
 	tx, err := p.database.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Task{}, fmt.Errorf("begin status transition: %w", err)
 	}
 	defer tx.Rollback()
+	// ユーザーグラフのロック取得
 	if err := lockUserGraph(ctx, tx, userID); err != nil {
 		return domain.Task{}, err
 	}
@@ -117,8 +124,7 @@ func (p *Postgres) ApplyStatusTransition(ctx context.Context, userID, taskID str
 		return domain.Task{}, domain.ErrStatusImpactPlanChanged
 	}
 
-	// Stable ID ordering prevents concurrent status operations from taking row
-	// locks in opposing orders. The graph advisory lock protects the snapshot.
+	// 行ロック順序固定とスナップショット保護
 	changes := append([]domain.StatusTransitionChange(nil), current.Changes...)
 	sort.Slice(changes, func(i, j int) bool { return changes[i].TaskID < changes[j].TaskID })
 	for _, change := range changes {
@@ -126,6 +132,7 @@ func (p *Postgres) ApplyStatusTransition(ctx context.Context, userID, taskID str
 		if change.ToProgress != nil {
 			progress = *change.ToProgress
 		}
+		// 状態更新の実行
 		result, updateErr := tx.ExecContext(ctx, `UPDATE tasks SET status=$1,leaf_progress=$2,version=version+1,updated_at=now() WHERE id=$3 AND user_id=$4 AND version=$5 AND status=$6 AND deleted_at IS NULL`, change.ToStatus, progress, change.TaskID, userID, change.ExpectedVersion, change.FromStatus)
 		if updateErr != nil {
 			return domain.Task{}, fmt.Errorf("apply status impact: %w", updateErr)
@@ -154,12 +161,14 @@ func (p *Postgres) ApplyStatusTransition(ctx context.Context, userID, taskID str
 			}
 		}
 	}
+	// 遷移の確定
 	if err := tx.Commit(); err != nil {
 		return domain.Task{}, fmt.Errorf("commit status transition: %w", err)
 	}
 	return p.Get(ctx, userID, taskID)
 }
 
+// 状態遷移計画の一致判定
 func equalStatusTransitionPlan(a, b domain.StatusTransitionPlan) bool {
 	if a.TaskID != b.TaskID || a.ToStatus != b.ToStatus || a.ExpectedVersion != b.ExpectedVersion || a.RequiresConfirmation != b.RequiresConfirmation || len(a.Changes) != len(b.Changes) {
 		return false
@@ -173,4 +182,5 @@ func equalStatusTransitionPlan(a, b domain.StatusTransitionPlan) bool {
 	return true
 }
 
+// 整数ポインタの一致判定
 func sameIntPointers(a, b *int) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }

@@ -9,10 +9,13 @@ import (
 	"time"
 )
 
+// 有効アドバイスの検索
 func (p *Postgres) FindAdvice(ctx context.Context, userID string, genreID *string, hash string) (domain.Advice, error) {
 	var a domain.Advice
 	var genre sql.NullString
+	// アドバイス行のスキャン
 	err := p.database.QueryRowContext(ctx, `SELECT id,user_id,genre_id,content,source_hash,generated_at,expires_at FROM ai_advices WHERE user_id=$1 AND genre_id IS NOT DISTINCT FROM $2 AND source_hash=$3 AND expires_at>now() ORDER BY generated_at DESC LIMIT 1`, userID, genreID, hash).Scan(&a.ID, &a.UserID, &genre, &a.Content, &a.SourceHash, &a.GeneratedAt, &a.ExpiresAt)
+	// 未存在時の禁止エラー変換
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, domain.ErrForbidden
 	}
@@ -25,10 +28,13 @@ func (p *Postgres) FindAdvice(ctx context.Context, userID string, genreID *strin
 	return a, nil
 }
 
+// 最新アドバイスの取得
 func (p *Postgres) LatestAdvice(ctx context.Context, userID string, genreID *string) (domain.Advice, error) {
 	var advice domain.Advice
 	var genre sql.NullString
+	// 最新行のスキャン
 	err := p.database.QueryRowContext(ctx, `SELECT id,user_id,genre_id,content,source_hash,generated_at,expires_at FROM ai_advices WHERE user_id=$1 AND genre_id IS NOT DISTINCT FROM $2 AND expires_at>now() ORDER BY generated_at DESC LIMIT 1`, userID, genreID).Scan(&advice.ID, &advice.UserID, &genre, &advice.Content, &advice.SourceHash, &advice.GeneratedAt, &advice.ExpiresAt)
+	// 未存在時の禁止エラー変換
 	if errors.Is(err, sql.ErrNoRows) {
 		return advice, domain.ErrForbidden
 	}
@@ -40,26 +46,35 @@ func (p *Postgres) LatestAdvice(ctx context.Context, userID string, genreID *str
 	}
 	return advice, nil
 }
+
+// アドバイスの保存
 func (p *Postgres) SaveAdvice(ctx context.Context, a domain.Advice) (domain.Advice, error) {
 	id, err := p.ids.New()
 	if err != nil {
 		return a, err
 	}
 	a.ID = id
+	// アドバイス行の挿入
 	_, err = p.database.ExecContext(ctx, `INSERT INTO ai_advices(id,user_id,genre_id,content,source_hash,generated_at,expires_at)VALUES($1,$2,$3,$4,$5,$6,$7)`, a.ID, a.UserID, a.GenreID, a.Content, a.SourceHash, a.GeneratedAt, a.ExpiresAt)
 	if err != nil {
 		return domain.Advice{}, fmt.Errorf("save advice: %w", err)
 	}
 	return a, nil
 }
+
+// 期限切れアドバイスの削除
 func (p *Postgres) DeleteExpiredAdvice(ctx context.Context, now time.Time) (int64, error) {
+	// 期限切れ行の削除
 	result, err := p.database.ExecContext(ctx, `DELETE FROM ai_advices WHERE expires_at<=$1`, now)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
+
+// アドバイス対象ユーザーの一覧
 func (p *Postgres) ListAdviceUsers(ctx context.Context) ([]domain.AdviceUser, error) {
+	// 対象ユーザーの取得
 	rows, err := p.database.QueryContext(ctx, `SELECT users.id,users.timezone,MAX(advice.generated_at) FROM users LEFT JOIN ai_advices advice ON advice.user_id=users.id AND advice.genre_id IS NULL GROUP BY users.id,users.timezone ORDER BY users.id`)
 	if err != nil {
 		return nil, err
@@ -69,6 +84,7 @@ func (p *Postgres) ListAdviceUsers(ctx context.Context) ([]domain.AdviceUser, er
 	for rows.Next() {
 		var user domain.AdviceUser
 		var last sql.NullTime
+		// ユーザー行のスキャン
 		if err := rows.Scan(&user.UserID, &user.Timezone, &last); err != nil {
 			return nil, err
 		}

@@ -7,6 +7,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// 優先度・スコア・推薦理由のダッシュボード投影
 func TestDashboardProjectionUsesDomainPriorityScoreAndReasons(t *testing.T) {
 	now := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	soon := now.Add(12 * time.Hour)
@@ -15,6 +16,7 @@ func TestDashboardProjectionUsesDomainPriorityScoreAndReasons(t *testing.T) {
 		{ID: "blocker", UserID: "u", GenreID: "g", Title: "Prerequisite", Status: domain.NotStarted, EndAt: &soon, Version: 1, CreatedAt: old},
 		{ID: "dependent", UserID: "u", GenreID: "g", Title: "Dependent", Status: domain.NotStarted, Version: 1, CreatedAt: now},
 	}
+	// 依存関係付きダッシュボード投影の実行
 	responses, err := projectDashboardResponses(tasks, []domain.Dependency{{TaskID: "dependent", DependsOnTaskID: "blocker"}}, map[string][]domain.Confirmation{
 		"dependent": {{Status: domain.ConfirmationChecking}},
 	}, now)

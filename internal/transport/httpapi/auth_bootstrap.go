@@ -14,6 +14,7 @@ import (
 	googleintegration "tasmane/internal/integration/google"
 )
 
+// 認証ブートストラップのリクエスト本体
 type authBootstrapRequest struct {
 	GoogleSubject string   `json:"googleSubject"`
 	Email         string   `json:"email"`
@@ -23,23 +24,24 @@ type authBootstrapRequest struct {
 	Scopes        []string `json:"scopes"`
 }
 
+// 内部ユーザーID払い出しの応答
 type authBootstrapResponse struct {
 	UserID string `json:"userId"`
 }
 
+// ユーザープロビジョニングの永続化境界
 type authBootstrapStore interface {
 	Bootstrap(context.Context, authBootstrapRequest) (string, error)
 }
 
+// Postgres上のユーザーとGoogle連携の初期化
 type postgresAuthBootstrap struct {
 	database *sql.DB
 	cipher   googleintegration.TokenCipher
 	ids      *identifier.UUIDv7Generator
 }
 
-// NewAuthBootstrapHandler provisions the stable internal user ID after the
-// Worker has cryptographically verified Google's ID token. It has its own
-// binding-secret check because the caller does not yet have a user ID.
+// Worker検証後の内部ユーザーID払い出し
 func NewAuthBootstrapHandler(database *sql.DB, cipher googleintegration.TokenCipher, bindingSecret string) http.Handler {
 	return newAuthBootstrapHandler(&postgresAuthBootstrap{
 		database: database,
@@ -48,8 +50,10 @@ func NewAuthBootstrapHandler(database *sql.DB, cipher googleintegration.TokenCip
 	}, bindingSecret)
 }
 
+// バインディング照合付きブートストラップハンドラ
 func newAuthBootstrapHandler(store authBootstrapStore, bindingSecret string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// バインディング秘密の照合
 		provided := r.Header.Get("X-Tasmane-Internal-Binding")
 		validBinding := bindingSecret != "" && len(provided) == len(bindingSecret) &&
 			subtle.ConstantTimeCompare([]byte(provided), []byte(bindingSecret)) == 1
@@ -61,6 +65,7 @@ func newAuthBootstrapHandler(store authBootstrapStore, bindingSecret string) htt
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		// リクエストJSONのデコード
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -69,15 +74,18 @@ func newAuthBootstrapHandler(store authBootstrapStore, bindingSecret string) htt
 			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid identity")
 			return
 		}
+		// ユーザープロビジョニングの呼び出し
 		userID, err := store.Bootstrap(r.Context(), input)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "user provisioning failed")
 			return
 		}
+		// ユーザーIDレスポンスの書き出し
 		writeJSON(w, http.StatusOK, authBootstrapResponse{UserID: userID})
 	})
 }
 
+// Google subjectとメール形式の検証
 func validBootstrapIdentity(input authBootstrapRequest) bool {
 	input.GoogleSubject = strings.TrimSpace(input.GoogleSubject)
 	input.Email = strings.TrimSpace(input.Email)
@@ -88,6 +96,7 @@ func validBootstrapIdentity(input authBootstrapRequest) bool {
 	return err == nil && strings.EqualFold(address.Address, input.Email)
 }
 
+// ユーザー・設定・Google連携の原子的初期化
 func (p *postgresAuthBootstrap) Bootstrap(ctx context.Context, input authBootstrapRequest) (string, error) {
 	if p == nil || p.database == nil || p.ids == nil {
 		return "", errors.New("auth bootstrap store is unavailable")
@@ -101,6 +110,7 @@ func (p *postgresAuthBootstrap) Bootstrap(ctx context.Context, input authBootstr
 		return "", err
 	}
 	defer tx.Rollback()
+	// ユーザー行のupsert
 	if err := tx.QueryRowContext(ctx, `INSERT INTO users(id,google_subject,email,display_name,avatar_url)
 		VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''))
 		ON CONFLICT(google_subject) DO UPDATE SET email=EXCLUDED.email,
@@ -109,10 +119,12 @@ func (p *postgresAuthBootstrap) Bootstrap(ctx context.Context, input authBootstr
 		strings.TrimSpace(input.DisplayName), strings.TrimSpace(input.AvatarURL)).Scan(&userID); err != nil {
 		return "", err
 	}
+	// サーバー設定行の確保
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_server_settings(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`, userID); err != nil {
 		return "", err
 	}
 	if input.RefreshToken != "" {
+		// リフレッシュトークンの暗号化と連携保存
 		encrypted, err := p.cipher.Encrypt(input.RefreshToken)
 		if err != nil {
 			return "", err

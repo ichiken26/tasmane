@@ -11,6 +11,7 @@ import (
 
 var ErrInvalidScoringInput = errors.New("invalid scoring input")
 
+// 優先度算出の入力
 type PriorityInput struct {
 	Now                                  time.Time
 	Deadline                             *time.Time
@@ -19,12 +20,14 @@ type PriorityInput struct {
 	DirectDependents, IndirectDependents int
 }
 
+// 優先度算出の結果
 type PriorityResult struct {
 	Score    int
 	Priority Priority
 	Deadline *time.Time
 }
 
+// 手動優先度を優先する実効優先度
 func EffectivePriority(manual *Priority, calculated Priority) (Priority, error) {
 	if manual != nil {
 		if _, ok := priorityValue(*manual); !ok {
@@ -38,7 +41,9 @@ func EffectivePriority(manual *Priority, calculated Priority) (Priority, error) 
 	return calculated, nil
 }
 
+// 優先度スコアの算出
 func CalculatePriority(input PriorityInput) (PriorityResult, error) {
+	// 進捗と依存件数の入力検証
 	if input.Progress != nil && (*input.Progress < 0 || *input.Progress > 100) {
 		return PriorityResult{}, ErrInvalidProgress
 	}
@@ -50,6 +55,7 @@ func CalculatePriority(input PriorityInput) (PriorityResult, error) {
 	if deadline == nil {
 		return PriorityResult{Score: 50, Priority: MediumPriority}, nil
 	}
+	// 期限・進捗・依存の加重合成
 	progress := 0
 	if input.Progress != nil {
 		progress = *input.Progress
@@ -60,6 +66,7 @@ func CalculatePriority(input PriorityInput) (PriorityResult, error) {
 	return PriorityResult{Score: score, Priority: priorityForScore(score), Deadline: deadline}, nil
 }
 
+// 自身期限または子孫最短期限の採用
 func effectiveDeadline(own *time.Time, descendants []time.Time) *time.Time {
 	if own != nil {
 		value := *own
@@ -77,6 +84,7 @@ func effectiveDeadline(own *time.Time, descendants []time.Time) *time.Time {
 	return &value
 }
 
+// スコア帯から優先度への写像
 func priorityForScore(score int) Priority {
 	if score <= scoring.PriorityLowMaximum {
 		return LowPriority
@@ -87,6 +95,7 @@ func priorityForScore(score int) Priority {
 	return HighPriority
 }
 
+// タスクスコア算出の入力
 type TaskScoreInput struct {
 	ID                         string
 	Status                     Status
@@ -100,6 +109,7 @@ type TaskScoreInput struct {
 	HasCheckingConfirmation    bool
 }
 
+// タスクスコア算出の結果
 type TaskScoreResult struct {
 	ID       string
 	Score    int
@@ -108,7 +118,9 @@ type TaskScoreResult struct {
 	Reasons  []string
 }
 
+// タスクスコアの算出
 func CalculateTaskScore(input TaskScoreInput) (TaskScoreResult, error) {
+	// 識別子・状態・時刻の入力検証
 	if strings.TrimSpace(input.ID) == "" || !validTaskStatus(input.Status) || input.Now.IsZero() || input.CreatedAt.IsZero() ||
 		(input.Deadline != nil && input.Deadline.IsZero()) || input.DirectDependents < 0 {
 		return TaskScoreResult{}, ErrInvalidScoringInput
@@ -129,6 +141,7 @@ func CalculateTaskScore(input TaskScoreInput) (TaskScoreResult, error) {
 	if !ok {
 		return TaskScoreResult{}, ErrInvalidPriority
 	}
+	// 期限・依存・経過日の成分算出
 	progress := 0
 	if input.Progress != nil {
 		progress = *input.Progress
@@ -152,6 +165,7 @@ func CalculateTaskScore(input TaskScoreInput) (TaskScoreResult, error) {
 	}
 	ageScore := minInt(100, roundScore(ageDays/float64(scoring.TaskAgeCapDays)*100))
 	confirmationScore := 50
+	// 加重合成とペナルティ適用
 	score := roundScore(float64(deadlineScore)*scoring.TaskDeadlineWeight + float64(priorityScore)*scoring.TaskPriorityWeight + float64(dependencyScore)*scoring.TaskDependencyWeight + float64(100-progress)*scoring.TaskProgressWeight + float64(ageScore)*scoring.TaskAgeWeight + float64(confirmationScore)*scoring.TaskConfirmationWeight)
 	if len(input.UnmetDependencies) > 0 {
 		score -= scoring.UnmetDependencyPenalty
@@ -164,6 +178,7 @@ func CalculateTaskScore(input TaskScoreInput) (TaskScoreResult, error) {
 		}
 	}
 	result.Score = clampScore(score)
+	// 表示理由の付与
 	if overdue {
 		result.Reasons = append(result.Reasons, "期限切れ")
 	} else if input.Deadline != nil && input.Deadline.Sub(input.Now) <= 7*24*time.Hour {
@@ -192,6 +207,7 @@ func CalculateTaskScore(input TaskScoreInput) (TaskScoreResult, error) {
 	return result, nil
 }
 
+// 適格性・スコア・期限・IDの安定ソート
 func SortTaskScores(results []TaskScoreResult) {
 	sort.SliceStable(results, func(i, j int) bool {
 		if results[i].Eligible != results[j].Eligible {
@@ -210,6 +226,7 @@ func SortTaskScores(results []TaskScoreResult) {
 	})
 }
 
+// 期限までの時間帯による緊急度
 func deadlineUrgency(now, deadline time.Time) int {
 	hours := deadline.Sub(now).Hours()
 	if hours <= scoring.DeadlineUrgencyThresholdHours[0] {
@@ -224,11 +241,16 @@ func deadlineUrgency(now, deadline time.Time) int {
 	return 25
 }
 
+// 優先度の数値化
 func priorityValue(priority Priority) (int, bool) {
 	value, ok := map[Priority]int{LowPriority: 20, MediumPriority: 60, HighPriority: 100}[priority]
 	return value, ok
 }
+
+// スコアの四捨五入
 func roundScore(value float64) int { return int(math.Round(value)) }
+
+// スコアの0から100へのクランプ
 func clampScore(value int) int {
 	if value < 0 {
 		return 0
@@ -238,6 +260,8 @@ func clampScore(value int) int {
 	}
 	return value
 }
+
+// 整数の小さい方の選択
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -245,10 +269,12 @@ func minInt(a, b int) int {
 	return b
 }
 
+// 既知タスク状態の判定
 func validTaskStatus(status Status) bool {
 	return status == NotStarted || status == InProgress || status == Completed
 }
 
+// ゼロ時刻の含有判定
 func containsZeroTime(values []time.Time) bool {
 	for _, value := range values {
 		if value.IsZero() {
@@ -258,6 +284,7 @@ func containsZeroTime(values []time.Time) bool {
 	return false
 }
 
+// 上限付き乗算
 func saturatingMultiply(cap, value, multiplier int) int {
 	if value >= (cap+multiplier-1)/multiplier {
 		return cap
@@ -265,6 +292,7 @@ func saturatingMultiply(cap, value, multiplier int) int {
 	return value * multiplier
 }
 
+// 上限付き加算
 func saturatingAdd(cap, left, right int) int {
 	if left >= cap-right {
 		return cap
@@ -272,6 +300,7 @@ func saturatingAdd(cap, left, right int) int {
 	return left + right
 }
 
+// 上限付き加重和
 func saturatingWeightedSum(cap, first, firstWeight, second, secondWeight int) int {
 	return saturatingAdd(cap, saturatingMultiply(cap, first, firstWeight), saturatingMultiply(cap, second, secondWeight))
 }

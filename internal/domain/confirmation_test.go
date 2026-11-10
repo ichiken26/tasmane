@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// 確認状態遷移の検証
 func TestConfirmationFSM(t *testing.T) {
 	c := Confirmation{Status: ConfirmationUnconfirmed}
 	checking, err := c.Transition(ConfirmationChecking, time.Time{})
@@ -29,6 +30,7 @@ func TestConfirmationFSM(t *testing.T) {
 	}
 }
 
+// ゼロ確定時刻の拒否検証
 func TestConfirmationFSMRejectsZeroConfirmedAt(t *testing.T) {
 	checking := Confirmation{Status: ConfirmationChecking}
 	if _, err := checking.Transition(ConfirmationConfirmed, time.Time{}); !errors.Is(err, ErrInvalidConfirmationInput) {
@@ -36,6 +38,7 @@ func TestConfirmationFSMRejectsZeroConfirmedAt(t *testing.T) {
 	}
 }
 
+// 確認状態遷移表の網羅検証
 func TestConfirmationFSMTransitionTable(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	statuses := []ConfirmationStatus{ConfirmationUnconfirmed, ConfirmationChecking, ConfirmationConfirmed}
@@ -60,6 +63,7 @@ func TestConfirmationFSMTransitionTable(t *testing.T) {
 	}
 }
 
+// 確認スコア境界と状態差の検証
 func TestConfirmationScoreBoundariesAndStatus(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	unconfirmed, ok, err := CalculateConfirmationScore(ConfirmationScoreInput{Status: ConfirmationUnconfirmed, ParentTaskScore: 50, Now: now})
@@ -80,6 +84,7 @@ func TestConfirmationScoreBoundariesAndStatus(t *testing.T) {
 	}
 }
 
+// 確認スコアの不正入力拒否検証
 func TestConfirmationScoreRejectsInvalidInput(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	zero := time.Time{}

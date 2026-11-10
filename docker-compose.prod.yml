@@ -1,75 +1,115 @@
-# Private Go runtime stack. Keep this network unreachable from the public Internet.
-# The Cloudflare Worker is the only public ingress and must reach the API via Tunnel/Binding.
+# 自宅サーバーで動かす非公開 Go ランタイムスタック
+# 公開入口は Cloudflare Worker（Nuxt）のみ。Worker → Go API は Cloudflare Tunnel 上の Workers VPC Service 経由
+# Go API はインターネットへポートを公開しない（ルーターのポート開放も不要。cloudflared は外向き接続のみ）
+
+name: tasmane
+
+# API と cloudflared だけが参加する固定アドレスのネットワーク
+# Workers VPC Service は Tunnel から見た宛先として api の固定 IPv4 を使う
+networks:
+  tunnel:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${TASMANE_TUNNEL_SUBNET:-172.29.80.0/24}
 
 services:
+  # 起動時マイグレーション（完了後に他サービス起動）
   migrate:
     build:
       context: .
       dockerfile: Dockerfile
       target: migrate
-    env_file: [.env]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     restart: "no"
 
+  # 非公開 HTTP API（Tunnel 経由の Worker と、ホストの 127.0.0.1 からのヘルスチェックのみ）
   api:
     build:
       context: .
       dockerfile: Dockerfile
       target: api
-    env_file: [.env]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      TASMANE_INTERNAL_BINDING_SECRET: ${TASMANE_INTERNAL_BINDING_SECRET}
-      TASMANE_IMPACT_TOKEN_SECRET: ${TASMANE_IMPACT_TOKEN_SECRET}
-      TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY: ${TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY}
-      # Containers / Tunnel peers need a non-loopback bind.
-      TASMANE_HTTP_ADDR: ${TASMANE_HTTP_ADDR:-0.0.0.0:8080}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      TASMANE_INTERNAL_BINDING_SECRET: ${TASMANE_INTERNAL_BINDING_SECRET:?TASMANE_INTERNAL_BINDING_SECRET is required}
+      TASMANE_IMPACT_TOKEN_SECRET: ${TASMANE_IMPACT_TOKEN_SECRET:?TASMANE_IMPACT_TOKEN_SECRET is required}
+      TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY: ${TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY:?TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY is required}
+      TASMANE_HTTP_ADDR: 0.0.0.0:8080
+    networks:
+      default: {}
+      tunnel:
+        ipv4_address: ${TASMANE_API_TUNNEL_IP:-172.29.80.10}
+    # ホストのループバックのみ（LAN・インターネットには公開しない）
     ports:
       - "127.0.0.1:8080:8080"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # Cloudflare Tunnel コネクタ（リモート管理トンネル。Cloudflare への外向き接続のみ）
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.10.0}
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TASMANE_TUNNEL_TOKEN:?TASMANE_TUNNEL_TOKEN is required (cf tunnels token get <tunnel-id>)}
+    networks:
+      - tunnel
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Google Tasks 同期ワーカー
   google-worker:
     build:
       context: .
       dockerfile: Dockerfile
       target: google-worker
-    env_file: [.env]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
-      TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY: ${TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:?GOOGLE_OAUTH_CLIENT_ID is required}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:?GOOGLE_OAUTH_CLIENT_SECRET is required}
+      TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY: ${TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY:?TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY is required}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # Gemini 助言スケジューラ
   advice-scheduler:
     build:
       context: .
       dockerfile: Dockerfile
       target: advice-scheduler
-    env_file: [.env]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # ops プロファイル専用の cleanup ジョブ（30日経過したソフト削除の完全削除）
   cleanup:
     build:
       context: .
       dockerfile: Dockerfile
       target: cleanup
-    env_file: [.env]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     profiles: ["ops"]
     restart: "no"

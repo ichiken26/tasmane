@@ -1,4 +1,6 @@
 BEGIN;
+-- Google 同期ジョブキューの導入
+-- 同期ジョブテーブルと可用性インデックスの定義
 CREATE TABLE google_sync_jobs (
   id uuid PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

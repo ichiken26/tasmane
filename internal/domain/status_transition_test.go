@@ -2,6 +2,7 @@ package domain
 
 import "testing"
 
+// 子の完了解除による完了祖先再開の計画検証
 func TestPlanChildUncompleteReopensCompletedAncestors(t *testing.T) {
 	plan, err := PlanStatusTransition(
 		Task{ID: "leaf", Status: Completed, Progress: statusInt(100), Version: 4},
@@ -20,6 +21,7 @@ func TestPlanChildUncompleteReopensCompletedAncestors(t *testing.T) {
 	}
 }
 
+// 親リセット時の進行中子孫のみ対象の検証
 func TestPlanParentResetOnlyResetsInProgressDescendants(t *testing.T) {
 	plan, err := PlanStatusTransition(
 		Task{ID: "parent", Status: InProgress, HasChildren: true, Version: 2}, nil,
@@ -40,6 +42,7 @@ func TestPlanParentResetOnlyResetsInProgressDescendants(t *testing.T) {
 	}
 }
 
+// 親完了巻き戻し時の子孫と祖先維持の検証
 func TestPlanParentCompletedRollbackPreservesCompletedDescendantsAndAncestors(t *testing.T) {
 	plan, err := PlanStatusTransition(
 		Task{ID: "parent", Status: Completed, HasChildren: true, Version: 2},
@@ -51,4 +54,5 @@ func TestPlanParentCompletedRollbackPreservesCompletedDescendantsAndAncestors(t 
 	}
 }
 
+// テスト用の整数ポインタ生成
 func statusInt(value int) *int { return &value }

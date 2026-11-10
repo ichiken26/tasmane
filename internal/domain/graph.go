@@ -2,6 +2,7 @@ package domain
 
 import "errors"
 
+// グラフドメインのエラー群
 var (
 	ErrHierarchyCycle    = errors.New("hierarchy cycle")
 	ErrDependencyCycle   = errors.New("dependency cycle")
@@ -11,15 +12,19 @@ var (
 	ErrInvalidGraphInput = errors.New("invalid graph input")
 )
 
+// グラフ検証用のタスク
 type GraphTask struct {
 	ID, UserID, GenreID, ParentID string
 }
 
+// タスク間依存
 type Dependency struct {
 	TaskID, DependsOnTaskID string
 }
 
+// 階層割当の所有者・ジャンル・循環検証
 func ValidateHierarchyAssignment(tasks []GraphTask, taskID, parentID string) error {
+	// 索引と対象タスクの入力検証
 	byID, err := indexGraphTasks(tasks)
 	if err != nil || taskID == "" {
 		return ErrInvalidGraphInput
@@ -31,6 +36,7 @@ func ValidateHierarchyAssignment(tasks []GraphTask, taskID, parentID string) err
 	if parentID == "" {
 		return nil
 	}
+	// 親の所有者とジャンルの検証
 	parent, ok := byID[parentID]
 	if !ok {
 		return ErrGraphTaskNotFound
@@ -41,6 +47,7 @@ func ValidateHierarchyAssignment(tasks []GraphTask, taskID, parentID string) err
 	if task.GenreID != parent.GenreID {
 		return ErrGraphGenre
 	}
+	// 祖先経路の循環検出
 	seen := map[string]bool{}
 	for current := parentID; current != ""; {
 		if current == taskID || seen[current] {
@@ -62,7 +69,9 @@ func ValidateHierarchyAssignment(tasks []GraphTask, taskID, parentID string) err
 	return nil
 }
 
+// 依存追加の所有者・ジャンル・循環検証
 func ValidateDependencyAddition(tasks []GraphTask, dependencies []Dependency, taskID, dependsOnTaskID string) error {
+	// 索引と端点の入力検証
 	byID, err := indexGraphTasks(tasks)
 	if err != nil || taskID == "" || dependsOnTaskID == "" {
 		return ErrInvalidGraphInput
@@ -84,6 +93,7 @@ func ValidateDependencyAddition(tasks []GraphTask, dependencies []Dependency, ta
 	if taskID == dependsOnTaskID {
 		return ErrDependencyCycle
 	}
+	// 既存辺の検証と隣接リスト構築
 	adjacency := map[string][]string{}
 	for _, edge := range dependencies {
 		from, fromOK := byID[edge.TaskID]
@@ -103,6 +113,7 @@ func ValidateDependencyAddition(tasks []GraphTask, dependencies []Dependency, ta
 		adjacency[edge.TaskID] = append(adjacency[edge.TaskID], edge.DependsOnTaskID)
 	}
 	adjacency[taskID] = append(adjacency[taskID], dependsOnTaskID)
+	// 追加辺を含む循環検出
 	visiting, visited := map[string]bool{}, map[string]bool{}
 	var hasCycle func(string) bool
 	hasCycle = func(id string) bool {
@@ -129,6 +140,7 @@ func ValidateDependencyAddition(tasks []GraphTask, dependencies []Dependency, ta
 	return nil
 }
 
+// グラフタスクの一意索引
 func indexGraphTasks(tasks []GraphTask) (map[string]GraphTask, error) {
 	result := make(map[string]GraphTask, len(tasks))
 	for _, task := range tasks {

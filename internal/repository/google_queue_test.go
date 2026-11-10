@@ -9,6 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+// SKIP LOCKEDリースと所有Ackの検証
 func TestGoogleQueueClaimUsesSkipLockedLeaseAndAckOwnership(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -17,6 +18,7 @@ func TestGoogleQueueClaimUsesSkipLockedLeaseAndAckOwnership(t *testing.T) {
 	defer database.Close()
 	store := NewPostgres(database, nil)
 	now := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	// Claim SQLの期待
 	mock.ExpectQuery(regexp.QuoteMeta(`WITH candidate AS (
     SELECT id FROM google_sync_jobs
     WHERE available_at <= $1 AND (claimed_at IS NULL OR claimed_at < $1-$3::interval)
@@ -30,6 +32,7 @@ func TestGoogleQueueClaimUsesSkipLockedLeaseAndAckOwnership(t *testing.T) {
 	if err != nil || !ok || job.ID != "j1" || job.UserID != "u1" || job.Attempt != 2 {
 		t.Fatalf("job=%#v ok=%v err=%v", job, ok, err)
 	}
+	// Ack SQLの期待
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM google_sync_jobs WHERE id=$1 AND claimed_by=$2`)).WithArgs("j1", "worker-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := store.Ack(context.Background(), "j1", "worker-1"); err != nil {
 		t.Fatal(err)

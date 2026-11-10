@@ -12,13 +12,16 @@ import (
 	"strings"
 )
 
+// Gemini GenerateContent APIクライアント
 type Client struct {
 	APIKey, Model string
 	HTTP          *http.Client
 	BaseURL       string
 }
 
+// プロンプトからのテキスト生成
 func (c Client) Generate(ctx context.Context, prompt string) (string, error) {
+	// 必須パラメータの検証
 	if c.APIKey == "" || c.Model == "" || strings.TrimSpace(prompt) == "" {
 		return "", errors.New("gemini api key, model, and prompt are required")
 	}
@@ -26,6 +29,7 @@ func (c Client) Generate(ctx context.Context, prompt string) (string, error) {
 	if base == "" {
 		base = "https://generativelanguage.googleapis.com/v1beta/models"
 	}
+	// リクエストJSONの組み立て
 	body, _ := json.Marshal(map[string]any{"contents": []any{map[string]any{"parts": []any{map[string]string{"text": prompt}}}}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/"+url.PathEscape(c.Model)+":generateContent", bytes.NewReader(body))
 	if err != nil {
@@ -37,6 +41,7 @@ func (c Client) Generate(ctx context.Context, prompt string) (string, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	// Gemini APIの呼び出し
 	res, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -49,6 +54,7 @@ func (c Client) Generate(ctx context.Context, prompt string) (string, error) {
 	if res.StatusCode/100 != 2 {
 		return "", fmt.Errorf("gemini status %d", res.StatusCode)
 	}
+	// 応答テキストの抽出
 	var decoded struct {
 		Candidates []struct {
 			Content struct {

@@ -3,6 +3,7 @@ set -euo pipefail
 
 echo "[verify] starting"
 
+# Go ツールチェーンの解決と版数確認
 [[ -f go.mod ]] || { echo "go.mod is required"; exit 1; }
 if [[ -n "${TASMANE_GO_BIN:-}" ]]; then
   GO_BIN="$TASMANE_GO_BIN"
@@ -23,14 +24,17 @@ test -z "$("$GOFMT_BIN" -l cmd db internal | head -n 1)" || { echo "gofmt requir
 echo "[verify] lint/typecheck/static analysis"
 GOFLAGS="${GOFLAGS:-} -buildvcs=false" "$GO_BIN" vet ./...
 echo "[verify] test"
+# Go テストと Python unittest の実行
 GOFLAGS="${GOFLAGS:-} -buildvcs=false" "$GO_BIN" test ./...
 GOFLAGS="${GOFLAGS:-} -buildvcs=false" "$GO_BIN" test -race ./...
 python3 -m unittest discover -s test -p '*_test.py'
 echo "[verify] build"
+# 一時ディレクトリへの Go ビルド
 VERIFY_BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$VERIFY_BUILD_DIR"' EXIT
 GOFLAGS="${GOFLAGS:-} -buildvcs=false" "$GO_BIN" build ./...
 
+# npm スクリプト（test / lint / typecheck / build）の実行
 [[ -f package.json ]] || { echo "package.json is required"; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "npm is required"; exit 1; }
 [[ -d node_modules ]] || { echo "node_modules missing; run npm ci"; exit 1; }
@@ -39,10 +43,12 @@ for script in test lint typecheck build; do
   npm run "$script"
 done
 
+# Spectral による OpenAPI リント（任意）
 if command -v spectral >/dev/null 2>&1; then
   spectral lint api/openapi.yaml
 fi
 
+# 契約検証スクリプトの実行
 python3 scripts/validate_contracts.py
 
 echo "[verify] OK"

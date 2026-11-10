@@ -10,6 +10,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// 所有中タスクへの確認事項作成
 func TestPostgresConfirmationCreateRequiresOwnedActiveTask(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -28,6 +29,7 @@ func TestPostgresConfirmationCreateRequiresOwnedActiveTask(t *testing.T) {
 	}
 }
 
+// 期待状態付き確認事項更新
 func TestPostgresConfirmationUpdateUsesExpectedStatus(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -47,6 +49,7 @@ func TestPostgresConfirmationUpdateUsesExpectedStatus(t *testing.T) {
 	}
 }
 
+// 同時遷移時の版衝突報告
 func TestPostgresConfirmationUpdateReportsConcurrentTransition(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -64,6 +67,7 @@ func TestPostgresConfirmationUpdateReportsConcurrentTransition(t *testing.T) {
 	}
 }
 
+// 確認事項スキャン列名の返却
 func confirmationColumns() []string {
 	return []string{"id", "user_id", "task_id", "content", "target_name", "status", "due_at", "confirmed_at"}
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// ユーザー現地4時の次回実行時刻検証
 func TestNextDailyRunUsesUserTimezoneAtFour(t *testing.T) {
 	now := time.Date(2026, 8, 12, 20, 0, 0, 0, time.UTC)
 	got, err := NextDailyRun(now, "Asia/Tokyo")
@@ -12,6 +13,8 @@ func TestNextDailyRunUsesUserTimezoneAtFour(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+// 現地4時以降の1日1回生成判定検証
 func TestShouldGenerateAdviceOnceAfterLocalFour(t *testing.T) {
 	now := time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)
 	user := AdviceUser{Timezone: "Asia/Tokyo"}

@@ -9,6 +9,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// タスクの新規作成
 func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskDraft, authorization domain.TaskCreateAuthorization) (domain.Task, error) {
 	if p == nil || p.database == nil || p.ids == nil || userID == "" {
 		return domain.Task{}, domain.ErrForbidden
@@ -24,12 +25,14 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 	if err != nil {
 		return domain.Task{}, err
 	}
+	// トランザクション開始
 	tx, err := p.database.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Task{}, fmt.Errorf("begin task create: %w", err)
 	}
 	defer tx.Rollback()
 	var genreID string
+	// ジャンル行の共有ロック取得
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM genres
     WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR SHARE`, draft.GenreID, userID).Scan(&genreID); errors.Is(err, sql.ErrNoRows) {
 		return domain.Task{}, domain.ErrForbidden
@@ -38,6 +41,7 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 	}
 	if draft.TaskTypeID != nil {
 		var allowed bool
+		// タスク種別割当の確認
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
       SELECT 1 FROM genre_task_types link
       JOIN task_types task_type ON task_type.id=link.task_type_id AND task_type.user_id=link.user_id
@@ -50,6 +54,7 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 		}
 	}
 	if draft.ParentTaskID != nil {
+		// ユーザーグラフのロック取得
 		if err := lockUserGraph(ctx, tx, userID); err != nil {
 			return domain.Task{}, err
 		}
@@ -57,10 +62,12 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 		var parentGenre string
 		var parentVersion int64
 		var hasChildren bool
+		// 親タスク行のロック取得
 		err := tx.QueryRowContext(ctx, `SELECT parent.status, parent.genre_id, parent.version,
       EXISTS (SELECT 1 FROM tasks child WHERE child.parent_task_id=parent.id AND child.user_id=parent.user_id AND child.deleted_at IS NULL)
       FROM tasks parent WHERE parent.id=$1 AND parent.user_id=$2 AND parent.deleted_at IS NULL FOR UPDATE OF parent`,
 			*draft.ParentTaskID, userID).Scan(&parentStatus, &parentGenre, &parentVersion, &hasChildren)
+		// 未存在時の禁止エラー変換
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Task{}, domain.ErrForbidden
 		}
@@ -71,7 +78,7 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 			return domain.Task{}, domain.ErrGraphGenre
 		}
 		if domain.Status(parentStatus) == domain.Completed {
-			return domain.Task{}, domain.ErrNotCompletable
+			return domain.Task{}, domain.ErrCompletedParent
 		}
 		if !hasChildren {
 			if !authorization.AllowLeafConversion {
@@ -80,12 +87,14 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 			if authorization.ParentVersion != parentVersion {
 				return domain.Task{}, domain.ErrVersionConflict
 			}
+			// リーフ親の親子化
 			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET leaf_progress=NULL, version=version+1
         WHERE id=$1 AND user_id=$2 AND version=$3 AND deleted_at IS NULL`, *draft.ParentTaskID, userID, parentVersion); err != nil {
 				return domain.Task{}, fmt.Errorf("convert leaf parent: %w", err)
 			}
 		}
 	}
+	// タスク行の挿入
 	if _, err := tx.ExecContext(ctx, `INSERT INTO tasks
     (id, user_id, genre_id, task_type_id, parent_task_id, title, body, status,
      start_at, end_at, is_all_day, leaf_progress, manual_priority, version)
@@ -94,9 +103,17 @@ func (p *Postgres) Create(ctx context.Context, userID string, draft domain.TaskD
 		task.Title, task.Body, task.Status, task.StartAt, task.EndAt, task.IsAllDay, task.ManualPriority); err != nil {
 		return domain.Task{}, fmt.Errorf("insert task: %w", err)
 	}
-	if err := p.enqueueGoogleTaskTx(ctx, tx, userID, task.ID, domain.GoogleSyncTask); err != nil {
+	// 承認済み祖先日付伝播の適用
+	if err := p.applyDateChangesTx(ctx, tx, userID, task.ID, authorization.DateChanges); err != nil {
 		return domain.Task{}, err
 	}
+	// Google取込起点の作成はGoogleへ再送しない（呼び出し側で紐付け）
+	if !isGoogleInbound(ctx) {
+		if err := p.enqueueGoogleTaskTx(ctx, tx, userID, task.ID, domain.GoogleSyncTask); err != nil {
+			return domain.Task{}, err
+		}
+	}
+	// 作成の確定
 	if err := tx.Commit(); err != nil {
 		return domain.Task{}, fmt.Errorf("commit task create: %w", err)
 	}

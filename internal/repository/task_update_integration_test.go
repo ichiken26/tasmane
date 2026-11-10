@@ -16,6 +16,7 @@ import (
 	"tasmane/internal/domain"
 )
 
+// ジャンル移動と階層ガードの検証
 func TestPostgresTaskRepositoryAgainstFreshSchemaGenreMoveAndHierarchyGuards(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -30,6 +31,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchemaGenreMoveAndHierarchyGuards(t *
 	if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(schema) {
 		t.Fatal("unsafe generated schema")
 	}
+	// テストスキーマの作成
 	if _, err := admin.ExecContext(context.Background(), `CREATE SCHEMA `+schema); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +55,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchemaGenreMoveAndHierarchyGuards(t *
 		root     = "01890f3e-4c00-7000-8000-000000000205"
 		child    = "01890f3e-4c00-7000-8000-000000000206"
 	)
+	// フィクスチャの挿入
 	if _, err := database.Exec(`INSERT INTO users (id,google_subject,email) VALUES ($1,'move-user','move@example.com')`, userID); err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +109,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchemaGenreMoveAndHierarchyGuards(t *
 	var rootGenre, childGenre string
 	var rootParent sql.NullString
 	var childVersion, boundaryDependencies int
+	// 移動結果のスキャン
 	if err := database.QueryRow(`SELECT genre_id,parent_task_id FROM tasks WHERE id=$1`, root).Scan(&rootGenre, &rootParent); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +123,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchemaGenreMoveAndHierarchyGuards(t *
 		t.Fatalf("rootGenre=%s childGenre=%s parent=%v childVersion=%d dependencies=%d", rootGenre, childGenre, rootParent, childVersion, boundaryDependencies)
 	}
 
-	// Cross-Genre parenting is rejected under the same graph-locked update path.
+	// グラフロック下でのジャンル跨ぎ親子付け拒否
 	outsideTask, err := repo.Get(context.Background(), userID, outside)
 	if err != nil {
 		t.Fatal(err)

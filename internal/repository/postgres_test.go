@@ -18,8 +18,10 @@ import (
 	"tasmane/internal/domain"
 )
 
+// 固定UUID列のテスト生成器
 type fixedIDs struct{ values []string }
 
+// 先頭UUIDの払い出し
 func (f *fixedIDs) New() (string, error) {
 	if len(f.values) == 0 {
 		return "", errors.New("no test id")
@@ -29,6 +31,7 @@ func (f *fixedIDs) New() (string, error) {
 	return value, nil
 }
 
+// 親子・完了ガードの派生検証
 func TestPostgresTaskGetDerivesParentAndCompletionGuards(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -55,6 +58,7 @@ func TestPostgresTaskGetDerivesParentAndCompletionGuards(t *testing.T) {
 	}
 }
 
+// 状態更新の原子性と親進捗クリア
 func TestPostgresTaskUpdateIsAtomicAndClearsParentProgress(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -92,6 +96,7 @@ func TestPostgresTaskUpdateIsAtomicAndClearsParentProgress(t *testing.T) {
 	}
 }
 
+// 履歴失敗時のロールバック
 func TestPostgresTaskUpdateRollsBackHistoryFailure(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -121,6 +126,7 @@ func TestPostgresTaskUpdateRollsBackHistoryFailure(t *testing.T) {
 	}
 }
 
+// 版衝突の報告
 func TestPostgresTaskUpdateReportsVersionConflict(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -141,6 +147,7 @@ func TestPostgresTaskUpdateReportsVersionConflict(t *testing.T) {
 	}
 }
 
+// 欠落・削除行の隠蔽
 func TestPostgresTaskGetHidesMissingAndDeletedRows(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -154,6 +161,7 @@ func TestPostgresTaskGetHidesMissingAndDeletedRows(t *testing.T) {
 	}
 }
 
+// 新鮮スキーマに対するリポジトリ統合検証
 func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -168,6 +176,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(schema) {
 		t.Fatal("unsafe generated schema")
 	}
+	// テストスキーマの作成
 	if _, err := admin.ExecContext(context.Background(), `CREATE SCHEMA `+schema); err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +208,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 		childTaskID    = "01890f3e-4c00-7000-8000-000000000113"
 		outboxID       = "01890f3e-4c00-7000-8000-000000000114"
 	)
+	// フィクスチャの挿入
 	if _, err := database.Exec(`INSERT INTO users (id, google_subject, email) VALUES
 		($1, 'repo-user', 'repo@example.com'), ($2, 'other-user', 'other@example.com')`, userID, otherUserID); err != nil {
 		t.Fatal(err)
@@ -239,6 +249,7 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	var status string
 	var progress sql.NullInt64
 	var version, historyCount int
+	// 永続結果のスキャン
 	if err := database.QueryRow(`SELECT status, leaf_progress, version FROM tasks WHERE id=$1`, parentID).Scan(&status, &progress, &version); err != nil {
 		t.Fatal(err)
 	}
@@ -375,4 +386,5 @@ func TestPostgresTaskRepositoryAgainstFreshSchema(t *testing.T) {
 	}
 }
 
+// 文字列ポインタの生成
 func stringPointer(value string) *string { return &value }

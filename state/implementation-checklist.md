@@ -107,3 +107,14 @@
 - [x] security/user-isolation review
 - [x] migration reproducible on fresh DB
 - [x] README operational steps
+
+## Phase 10 Spec alignment (2026-11-09)
+- [x] effectivePriority = manual ?? calculated on every read path (HTTP/MCP/WebMCP)
+- [x] leaf progress update (IN_PROGRESS leaf, 0..95 step 5, history)
+- [x] restore within 30 days (trash UI, Google re-create)
+- [x] confirmation target presets
+- [x] Google conflict resolution UI/API, import with genre selection, access-time sync, failed requeue, dedicated list recovery
+- [x] unmet dependency warning on start / schedule contradiction warning
+- [x] MCP confirmation_required for update/create impacts
+- [x] WebMCP tools (no delete, user permission, injection note)
+- [x] home-server topology via Cloudflare Tunnel + Workers VPC, cf CLI
