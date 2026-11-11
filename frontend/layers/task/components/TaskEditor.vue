@@ -8,7 +8,7 @@ import { impactPlanFrom } from '../../core/composables/impact'
 import { fromInputValue, toDateInput, toDateTimeInput } from '../../core/composables/dates'
 import { priorityOptions } from '../../core/composables/labels'
 import { ensureGenreTaskType } from '../../core/composables/taskTypes'
-import { memoEmbedUrl, memoTitleFromUrl, upsertMemoLink } from '../../memo/composables/memoBridge'
+import { memoEmbedUrl, memoTitleFromUrl, persistPendingMemoLinks, upsertMemoLink } from '../../memo/composables/memoBridge'
 import type { MemoLinkDraft } from '../../memo/composables/memoBridge'
 import { useMemoIntegration } from '../../memo/composables/useMemoIntegration'
 import { useNotify } from '../../shared/composables/useNotify'
@@ -32,6 +32,8 @@ const errorMessage = ref('')
 const impact = ref<ImpactPlan>()
 const remoteChanged = ref(false)
 const saved = ref(false)
+// メモ紐付けの失敗時も作成済みタスクのIDを保持し、再送で重複作成しない
+const createdTask = ref<ApiTask>()
 
 // メモアプリ連携（紐付けたメモ・埋め込みでの新規作成）
 type LinkedMemo = MemoLinkDraft & { id?: string }
@@ -57,14 +59,21 @@ async function toggleMemoIntegration(value: boolean) {
   finally { memoToggleBusy.value = false }
 }
 
-// 紐付けの保存（作成前は保留し、作成後にまとめて保存）
-async function persistMemoLink(link: LinkedMemo) {
-  memoLinks.value = upsertMemoLink(memoLinks.value, link)
-  if (!props.task) return
+// 紐付けの保存（タスク作成前は下書き。保存済みタスクではAPI成功後に表示）
+async function persistMemoLink(link: LinkedMemo): Promise<boolean> {
+  const taskId = props.task?.id ?? createdTask.value?.id
+  if (!taskId) {
+    memoLinks.value = upsertMemoLink(memoLinks.value, link)
+    return true
+  }
   try {
-    const stored = await api.addMemoLink(props.task.id, { url: link.url, title: link.title })
-    memoLinks.value = memoLinks.value.map(item => item.url === stored.url ? { ...item, id: stored.id, title: stored.title } : item)
-  } catch (error) { notify.error(error, 'メモを紐付けられませんでした。') }
+    const stored = await api.addMemoLink(taskId, { url: link.url, title: link.title })
+    memoLinks.value = upsertMemoLink(memoLinks.value, { ...link, id: stored.id, url: stored.url, title: stored.title })
+    return true
+  } catch (error) {
+    notify.error(error, 'メモを紐付けられませんでした。')
+    return false
+  }
 }
 // 埋め込みメモアプリでの保存通知
 function onMemoSaved(memo: { title: string; url: string }) { void persistMemoLink({ url: memo.url, title: memo.title }) }
@@ -76,9 +85,9 @@ async function addMemoUrl() {
   if (!url) return true
   const title = memoTitleFromUrl(url)
   if (!title) { notify.error(undefined, 'メモのURLの形式が正しくありません。'); return false }
-  memoUrlInput.value = ''
-  await persistMemoLink({ url, title })
-  return true
+  const persisted = await persistMemoLink({ url, title })
+  if (persisted) memoUrlInput.value = ''
+  return persisted
 }
 
 // タスク保存の前に、書きかけのメモと入力途中のURLを紐付けに反映
@@ -92,8 +101,9 @@ async function flushMemoDrafts() {
 }
 // 紐付けの解除（メモ自体は残る）
 async function removeMemoLink(link: LinkedMemo) {
-  if (props.task && link.id) {
-    try { await api.deleteMemoLink(props.task.id, link.id) }
+  const taskId = props.task?.id ?? createdTask.value?.id
+  if (taskId && link.id) {
+    try { await api.deleteMemoLink(taskId, link.id) }
     catch (error) { notify.error(error, '紐付けを外せませんでした。'); return }
   }
   memoLinks.value = memoLinks.value.filter(item => item.url !== link.url)
@@ -106,7 +116,11 @@ watch(savedMemo, (value) => {
 onMounted(async () => {
   await loadMemoSetting()
   if (!props.task) return
-  try { memoLinks.value = await api.memoLinks(props.task.id) } catch { memoLinks.value = [] }
+  try { memoLinks.value = await api.memoLinks(props.task.id) }
+  catch (error) {
+    notify.error(error, 'メモ一覧を取得できませんでした。')
+    errorMessage.value = 'メモ一覧を取得できませんでした。再読み込みするか、Go APIのデプロイ状況を確認してください。'
+  }
 })
 
 // フォーム初期値
@@ -248,19 +262,53 @@ function requestBody(token?: string): TaskInput {
 
 // タスクの作成または更新
 async function save(token?: string) {
-  if (!canSubmit.value && !token) return
+  if (busy.value || (!canSubmit.value && !token)) return
   busy.value = true
   errorMessage.value = ''
   try {
     if (!(await flushMemoDrafts())) return
     const body = requestBody(token)
-    const result = props.task
-      ? await api.updateTask(props.task.id, { ...body, expectedVersion: props.task.version })
-      : await api.createTask(body)
-    // 作成前に紐付けたメモの保存
+    let result: ApiTask
+    if (props.task) {
+      result = await api.updateTask(props.task.id, { ...body, expectedVersion: props.task.version })
+    } else if (createdTask.value) {
+      // 以前のメモ保存が失敗している場合は同じタスクに再試行する
+      result = dirty.value
+        ? await api.updateTask(createdTask.value.id, { ...body, expectedVersion: createdTask.value.version })
+        : createdTask.value
+      createdTask.value = result
+      baseline = JSON.stringify(form)
+    } else {
+      result = await api.createTask(body)
+      createdTask.value = result
+      baseline = JSON.stringify(form)
+    }
     if (!props.task && memoLinks.value.length) {
-      const results = await Promise.allSettled(memoLinks.value.map(link => api.addMemoLink(result.id, { url: link.url, title: link.title })))
-      if (results.some(item => item.status === 'rejected')) notify.warning('一部のメモを紐付けられませんでした', 'タスク詳細画面から紐付け直してください。')
+      const persisted = await persistPendingMemoLinks(memoLinks.value, link =>
+        api.addMemoLink(result.id, { url: link.url, title: link.title }))
+      memoLinks.value = persisted.links
+      if (persisted.failed.length) {
+        errorMessage.value = `タスク「${result.title}」は作成済みですが、メモ${persisted.failed.length}件の紐付けに失敗しました。画面を離れず再試行してください（タスクは重複作成されません）。`
+        notify.warning('メモの紐付けに失敗しました', 'タスク自体は作成済みです。Go APIのデプロイ状況も確認してください。')
+        return
+      }
+      // GETでも保存が確認できるまで画面を遷移しない
+      let verified: Awaited<ReturnType<typeof api.memoLinks>>
+      try { verified = await api.memoLinks(result.id) }
+      catch (error) {
+        notify.error(error, '保存後のメモ紐付け確認に失敗しました。')
+        errorMessage.value = 'タスクは作成済みですが、メモ一覧を確認できませんでした。再試行してください。'
+        return
+      }
+      const byUrl = new Map(verified.map(link => [link.url, link]))
+      memoLinks.value = memoLinks.value.map(link => {
+        const item = byUrl.get(link.url)
+        return item ? { ...link, id: item.id, title: item.title } : { ...link, id: undefined }
+      })
+      if (memoLinks.value.some(link => !link.id)) {
+        errorMessage.value = 'タスクは作成済みですが、一部のメモの保存を確認できませんでした。再試行してください。'
+        return
+      }
     }
     impact.value = undefined
     saved.value = true
@@ -281,11 +329,15 @@ async function save(token?: string) {
 defineShortcuts({ meta_enter: { usingInput: true, handler: () => { void save() } } })
 
 // 未保存の変更がある状態での離脱確認
+const hasPendingMemoLinks = computed(() => memoLinks.value.some(link => !link.id))
 onBeforeRouteLeave(() => {
-  if (dirty.value && !saved.value && !busy.value) return globalThis.confirm('保存していない変更があります。破棄して移動しますか？')
+  if ((dirty.value || hasPendingMemoLinks.value) && !saved.value && !busy.value)
+    return globalThis.confirm('未保存の変更またはメモの紐付けがあります。破棄して移動しますか？')
   return true
 })
-const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.value && !saved.value) event.preventDefault() }
+const beforeUnload = (event: BeforeUnloadEvent) => {
+  if ((dirty.value || hasPendingMemoLinks.value) && !saved.value) event.preventDefault()
+}
 onMounted(() => globalThis.addEventListener('beforeunload', beforeUnload))
 onBeforeUnmount(() => globalThis.removeEventListener('beforeunload', beforeUnload))
 </script>
@@ -395,7 +447,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('beforeunload', beforeUnloa
       <div class="flex flex-wrap items-center justify-end gap-2">
         <span class="mr-auto hidden items-center gap-1 text-xs text-(--ui-text-dimmed) sm:flex"><UKbd value="meta" /><UKbd value="Enter" /> で保存</span>
         <UButton v-if="task && dirty" color="neutral" variant="ghost" @click="reset()">変更を破棄</UButton>
-        <UButton type="submit" :loading="busy" :disabled="!canSubmit" icon="i-lucide-check">{{ task ? '変更を保存' : 'タスクを作成' }}</UButton>
+        <UButton type="submit" :loading="busy" :disabled="!canSubmit" icon="i-lucide-check">{{ task ? '変更を保存' : createdTask ? '保存を再試行' : 'タスクを作成' }}</UButton>
       </div>
     </form>
     <!-- 変更影響の確認 -->

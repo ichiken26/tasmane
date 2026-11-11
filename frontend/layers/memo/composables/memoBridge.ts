@@ -53,6 +53,29 @@ export function upsertMemoLink<T extends MemoLinkDraft>(links: T[], link: T): T[
   return links.map((item, position) => position === index ? { ...item, title: link.title } : item)
 }
 
+// 作成済みタスクへ未保存リンクだけ登録。失敗したリンクはIDなしで保持し、再試行できるようにする
+export async function persistPendingMemoLinks<T extends MemoLinkDraft & { id?: string }>(
+  links: T[],
+  add: (link: T) => Promise<{ id: string; url: string; title: string }>,
+): Promise<{ links: T[]; failed: T[] }> {
+  const pending = links.filter(link => !link.id)
+  const results = await Promise.allSettled(pending.map(link => add(link)))
+  const storedByOriginalUrl = new Map<string, { id: string; url: string; title: string }>()
+  const failed: T[] = []
+  results.forEach((result, index) => {
+    const draft = pending[index]!
+    if (result.status === 'fulfilled') storedByOriginalUrl.set(draft.url, result.value)
+    else failed.push(draft)
+  })
+  return {
+    links: links.map(link => {
+      const stored = storedByOriginalUrl.get(link.url)
+      return stored ? { ...link, ...stored } : link
+    }),
+    failed,
+  }
+}
+
 // 別タブで開くクリックか（Ctrl/⌘/Shift/中クリック）
 export function opensInNewTab(event: { button: number; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): boolean {
   return event.button === 1 || event.ctrlKey || event.metaKey || event.shiftKey

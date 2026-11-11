@@ -200,6 +200,7 @@ OpenAPI とルータの一致は `TestRouterMatchesOpenAPIOperations`、MCP の�
 |---|---|
 | 画面で「Tasmane API is unreachable」(503) | 自宅サーバー停止・回線断・cloudflared 停止。`docker compose ps`、`logs cloudflared`。VPC Service の宛先 IP と `TASMANE_API_TUNNEL_IP` の一致 |
 | 全 API が 401 | Worker と Go の Binding secret 不一致。両方を揃えて再デプロイ |
+| タスク新規作成後にメモURLが紐付かない | メモ用 API（`/v1/tasks/{id}/memo-links`）を持つ Go 版と migration 0010/0011 が自宅サーバーに反映済みか確認。`git pull && npm run deploy:go`（自宅サーバー）を実行し、ブラウザでメモの登録・再取得を確認 |
 | Google ログインに失敗 | Google Cloud Console の OAuth「対象」画面で外部ユーザー向けの公開状態・審査状況を確認。Cloudflare の 403 なら WAF / Access のルールを確認 |
 | 409 `IMPACT_TOKEN_INVALID` | 確認中に他の変更が入った。画面を再読み込みしてやり直す |
 | Google 同期が進まない（worker ログに `403 ... SERVICE_DISABLED`） | OAuth クライアントのプロジェクトで Google Tasks API が無効（1.2）。有効化して数分待てば、残っているジョブは自動で再実行される |

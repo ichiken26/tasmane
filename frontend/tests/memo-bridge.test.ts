@@ -42,6 +42,33 @@ describe('memo app bridge', () => {
     expect(upsertMemoLink(links, { url: 'u2', title: 'c' })).toEqual([{ url: 'u1', title: 'a' }, { url: 'u2', title: 'c' }])
   })
 
+  // 作成後に一部の紐付けが失敗しても、成功済みは再送せず未保存だけ再試行する
+  it('retries failed task memo links without duplicating the created task or stored links', async () => {
+    const { persistPendingMemoLinks } = await import('../layers/memo/composables/memoBridge')
+    const drafts = [
+      { url: 'https://memo.kokage-studio.com/memo/a', title: 'A' },
+      { url: 'https://memo.kokage-studio.com/memo/b', title: 'B' },
+    ]
+    const firstCalls: string[] = []
+    const first = await persistPendingMemoLinks(drafts, async (link) => {
+      firstCalls.push(link.url)
+      if (link.title === 'B') throw new Error('temporarily unavailable')
+      return { ...link, id: 'stored-a' }
+    })
+    expect(firstCalls).toHaveLength(2)
+    expect(first.failed).toHaveLength(1)
+    expect(first.links[0]?.id).toBe('stored-a')
+    expect(first.links[1]?.id).toBeUndefined()
+    const retried: string[] = []
+    const second = await persistPendingMemoLinks(first.links, async (link) => {
+      retried.push(link.url)
+      return { ...link, id: 'stored-b' }
+    })
+    expect(retried).toEqual(['https://memo.kokage-studio.com/memo/b'])
+    expect(second.failed).toEqual([])
+    expect(second.links.map(link => link.id)).toEqual(['stored-a', 'stored-b'])
+  })
+
   // Ctrl/⌘/Shift/中クリックは別タブ（ブラウザ標準）、通常クリックはアプリ内表示
   it('detects modified clicks that should open a new tab', () => {
     expect(opensInNewTab({ button: 0, ctrlKey: true, metaKey: false, shiftKey: false })).toBe(true)
