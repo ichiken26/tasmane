@@ -52,7 +52,7 @@ async function quickAdd() {
     <!-- ヒーロー -->
     <section>
       <p class="font-mono text-xs tracking-wider text-(--ui-text-muted) uppercase">{{ todayLabel }}</p>
-      <h1 class="mt-1 font-serif text-4xl leading-tight text-(--ui-text-highlighted) sm:text-5xl">{{ greeting }}。<br class="sm:hidden">NOW TASKS BELOW</h1>
+      <h1 class="mt-1 font-serif text-4xl leading-tight text-(--ui-text-highlighted) sm:text-5xl">{{ greeting }}, <br class="sm:hidden">NOW TASKS BELOW</h1>
     </section>
 
     <!-- クイック追加 -->
