@@ -87,7 +87,12 @@ describe('memoTitleFromUrl', () => {
     expect(memoTitleFromUrl('https://example.com/')).toBe('メモ')
     expect(memoTitleFromUrl('https://example.com/memo/memo-2026-x')).toBe('memo-2026-x')
   })
-  it('URLとして読めなければ null', () => {
+  it('URLとして読めない、またはGo APIが拒否するURLなら null', () => {
     expect(memoTitleFromUrl('not a url')).toBeNull()
+    expect(memoTitleFromUrl('javascript:alert(1)')).toBeNull()
+    expect(memoTitleFromUrl('ftp://example.com/note')).toBeNull()
+    expect(memoTitleFromUrl('http://example.com/note')).toBeNull()
+    expect(memoTitleFromUrl('https://user:pass@example.com/note')).toBeNull()
+    expect(memoTitleFromUrl('http://localhost:3000/note')).toBe('note')
   })
 })

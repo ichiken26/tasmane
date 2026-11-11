@@ -83,8 +83,15 @@ export function opensInNewTab(event: { button: number; ctrlKey: boolean; metaKey
 
 // URLからのメモ表示名（メモアプリのメモID memo-yyyymmdd-名前 は名前だけ。URLでなければ null）
 export function memoTitleFromUrl(url: string): string | null {
+  if (!url || url.length > 2048) return null
   let last: string
-  try { last = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '') }
-  catch { return null }
+  try {
+    const parsed = new URL(url)
+    const local = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+    // Go API と同じ制約: 公開URLはHTTPS、HTTPはローカルホストのみ
+    if (!parsed.hostname || parsed.username || parsed.password
+      || (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && local))) return null
+    last = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '')
+  } catch { return null }
   return /^memo-\d{8}-(.+)$/.exec(last)?.[1] || last || 'メモ'
 }
