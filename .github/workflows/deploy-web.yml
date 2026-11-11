@@ -54,12 +54,14 @@ jobs:
           # 値は環境変数から展開し、ファイルはジョブ終了で破棄される
           mkdir -p secrets
           umask 077
+          # production で許可リストが空だと全ユーザーを許可してしまうため、未設定ならデプロイを止める
+          : "${NUXT_ALLOWED_EMAILS:?Set NUXT_ALLOWED_EMAILS in production environment secrets}"
           {
-            echo 'NUXT_GOOGLE_CLIENT_ID=${NUXT_GOOGLE_CLIENT_ID}'
-            echo 'NUXT_GOOGLE_CLIENT_SECRET=${NUXT_GOOGLE_CLIENT_SECRET}'
-            echo 'NUXT_GOOGLE_REDIRECT_URI=${NUXT_GOOGLE_REDIRECT_URI}'
-            echo 'NUXT_SESSION_SECRET=${NUXT_SESSION_SECRET}'
-            echo 'NUXT_INTERNAL_BINDING_SECRET=${NUXT_INTERNAL_BINDING_SECRET}'
-            echo 'NUXT_ALLOWED_EMAILS=${NUXT_ALLOWED_EMAILS}'
+            printf 'NUXT_GOOGLE_CLIENT_ID=%s\n' "$NUXT_GOOGLE_CLIENT_ID"
+            printf 'NUXT_GOOGLE_CLIENT_SECRET=%s\n' "$NUXT_GOOGLE_CLIENT_SECRET"
+            printf 'NUXT_GOOGLE_REDIRECT_URI=%s\n' "$NUXT_GOOGLE_REDIRECT_URI"
+            printf 'NUXT_SESSION_SECRET=%s\n' "$NUXT_SESSION_SECRET"
+            printf 'NUXT_INTERNAL_BINDING_SECRET=%s\n' "$NUXT_INTERNAL_BINDING_SECRET"
+            printf 'NUXT_ALLOWED_EMAILS=%s\n' "$NUXT_ALLOWED_EMAILS"
           } > secrets/worker.env
           bash scripts/deploy-worker.sh
