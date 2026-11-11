@@ -109,9 +109,3 @@ export function isSameOriginWrite(method: string, headers: Headers, origin: stri
   // Origin を送らない古い実装向け: Fetch Metadata で同一オリジンを確認
   return headers.get('sec-fetch-site') === 'same-origin'
 }
-
-// ログイン許可リスト（カンマ区切り。未設定なら全員許可）
-export function isEmailAllowed(email: string, allowlist: string | undefined): boolean {
-  const allowed = (allowlist || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean)
-  return allowed.length === 0 || allowed.includes(email.trim().toLowerCase())
-}

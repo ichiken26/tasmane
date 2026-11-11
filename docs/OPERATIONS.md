@@ -33,6 +33,7 @@
 2. 承認済みリダイレクト URI: `https://tasmane.kokage-studio.com/auth/callback`
 3. スコープ: `openid` `email` `profile` `https://www.googleapis.com/auth/tasks`
 4. Client ID / Secret を Worker（`secrets/worker.env`）と自宅サーバー（`.env` の `GOOGLE_OAUTH_*`）の両方に設定（同じクライアントで可）。
+5. 一般公開する場合は Google Auth Platform → Audience（対象）で「外部 / 本番環境（In production）」を選ぶ。Google Tasks スコープの利用には Google の OAuth 検証が必要になる場合がある。
 
 ### 1.3 シークレット生成
 
@@ -80,7 +81,7 @@ docker compose -f docker-compose.prod.yml logs -f cloudflared  # "Registered tun
 ### 1.6 Worker（作業PC）
 
 ```bash
-cp secrets/worker.env.example secrets/worker.env   # 値を記入（NUXT_ALLOWED_EMAILS は必ず自分のアドレス）
+cp secrets/worker.env.example secrets/worker.env   # 値を記入（Googleログインのメール許可リストは不要）
 export TASMANE_API_VPC_SERVICE_ID=<1.4 の service id>
 npm ci
 npm run deploy:worker   # = scripts/cf-build.sh → cf deploy --prebuilt --secrets-file secrets/worker.env
@@ -112,7 +113,6 @@ Repository → Settings → Environments に `production` を作り、Secrets �
 | `TASMANE_API_VPC_SERVICE_ID` | 1.4 の service id |
 | `NUXT_GOOGLE_CLIENT_ID` / `NUXT_GOOGLE_CLIENT_SECRET` / `NUXT_GOOGLE_REDIRECT_URI` | OAuth |
 | `NUXT_SESSION_SECRET` / `NUXT_INTERNAL_BINDING_SECRET` | 1.3 |
-| `NUXT_ALLOWED_EMAILS` | ログインを許可するアドレス |
 
 - `verify.yml`: PR / push で Go・Node のテスト（PostgreSQL 統合テスト込み）と `cf deploy --dry-run`。
 - `deploy-web.yml`: main への push で Worker をデプロイ（Go 関連だけの変更では動かない）。
@@ -129,7 +129,7 @@ Repository → Settings → Environments に `production` を作り、Secrets �
 ## 2. 公開後のスモークテスト
 
 1. `https://tasmane.kokage-studio.com/` が表示される
-2. ログイン → Google → 戻ってくる（許可リスト外のアカウントは 403）
+2. ログイン → Google → 戻ってくる（個別のメール登録は不要。Google Cloud の OAuth 公開状態に依存）
 3. ジャンルとタスクを作成し、子タスク追加時に確認ダイアログが出る
 4. `/settings` でタイムゾーン保存、「今すぐ同期」→ Google Tasks に「タスマネ」リストができる
 5. タスクを削除 → `/trash` から復元できる
@@ -200,7 +200,7 @@ OpenAPI とルータの一致は `TestRouterMatchesOpenAPIOperations`、MCP の�
 |---|---|
 | 画面で「Tasmane API is unreachable」(503) | 自宅サーバー停止・回線断・cloudflared 停止。`docker compose ps`、`logs cloudflared`。VPC Service の宛先 IP と `TASMANE_API_TUNNEL_IP` の一致 |
 | 全 API が 401 | Worker と Go の Binding secret 不一致。両方を揃えて再デプロイ |
-| ログイン後 403 | `NUXT_ALLOWED_EMAILS` に含まれていない |
+| Google ログインに失敗 | Google Cloud Console の OAuth「対象」画面で外部ユーザー向けの公開状態・審査状況を確認。Cloudflare の 403 なら WAF / Access のルールを確認 |
 | 409 `IMPACT_TOKEN_INVALID` | 確認中に他の変更が入った。画面を再読み込みしてやり直す |
 | Google 同期が進まない（worker ログに `403 ... SERVICE_DISABLED`） | OAuth クライアントのプロジェクトで Google Tasks API が無効（1.2）。有効化して数分待てば、残っているジョブは自動で再実行される |
 | Google 同期が進まない | `/settings` の失敗一覧、`logs google-worker`。refresh token 失効時は一度ログアウト→ログイン（同意画面で再許可） |
@@ -221,7 +221,6 @@ OpenAPI とルータの一致は `TestRouterMatchesOpenAPIOperations`、MCP の�
 
 - [ ] Tunnel に Public Hostname が無く、ルーターのポート開放も無い
 - [ ] `127.0.0.1:8080` 以外で Go に到達できない
-- [ ] `NUXT_ALLOWED_EMAILS` が設定されている
 - [ ] Binding / Session / Impact / Google token 暗号鍵がすべて別値かつ 32 文字以上（暗号鍵は 32 bytes）
 - [ ] `.env`・`secrets/*` のパーミッションが 600 で Git に入っていない
 - [ ] OAuth リダイレクト URI が本番 URL と完全一致

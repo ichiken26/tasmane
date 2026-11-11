@@ -4,7 +4,7 @@ import { authConfig } from '../../utils/config'
 import { verifyGoogleIDToken } from '../../utils/oauth'
 import { memoHandoffExpiry } from '../../utils/oauth'
 import { setMemoHandoff } from '../../utils/memoHandoff'
-import { isEmailAllowed, sha256Hex } from '../../utils/security'
+import { sha256Hex } from '../../utils/security'
 import { fetchGoAPI, trustedProxyHeaders } from '../../utils/upstream'
 
 interface GoogleTokenResponse {
@@ -59,10 +59,6 @@ export default defineEventHandler(async (event) => {
     audience: config.googleClientId,
     nonce: await sha256Hex(transaction.nonce),
   })
-
-  // 許可リスト外のアカウントはユーザー作成前に拒否
-  if (!isEmailAllowed(identity.email, config.allowedEmails))
-    throw createError({ statusCode: 403, statusMessage: 'This Google account is not allowed to use Tasmane' })
 
   const bootstrapBody = JSON.stringify({
     googleSubject: identity.sub,

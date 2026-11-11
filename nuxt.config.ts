@@ -37,8 +37,6 @@ export default defineNuxtConfig({
     sessionSecret: process.env.NUXT_SESSION_SECRET,
     internalBindingSecret: process.env.NUXT_INTERNAL_BINDING_SECRET,
     apiInternalUrl: process.env.NUXT_API_INTERNAL_URL || 'http://127.0.0.1:8080',
-    // ログイン許可メールアドレス（カンマ区切り。自宅サーバー運用では設定を推奨）
-    allowedEmails: process.env.NUXT_ALLOWED_EMAILS || '',
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || '/api/v1',
       // 連携するメモアプリ（埋め込み表示・ログイン引き継ぎ先）

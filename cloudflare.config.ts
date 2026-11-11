@@ -32,8 +32,6 @@ export default defineConfig({
       NUXT_GOOGLE_REDIRECT_URI: bindings.secret(),
       NUXT_SESSION_SECRET: bindings.secret(),
       NUXT_INTERNAL_BINDING_SECRET: bindings.secret(),
-      // ログイン許可メールアドレス（カンマ区切り）
-      NUXT_ALLOWED_EMAILS: bindings.secret(),
     },
   },
 })

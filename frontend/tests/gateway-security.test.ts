@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { safeReturnTo } from '../../server/utils/auth'
 import { verifyGoogleIDToken } from '../../server/utils/oauth'
-import { isEmailAllowed, isSameOriginWrite, randomBase64Url, seal, unseal } from '../../server/utils/security'
+import { isSameOriginWrite, randomBase64Url, seal, unseal } from '../../server/utils/security'
 import { trustedProxyHeaders } from '../../server/utils/upstream'
 
 const encode = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -55,13 +55,6 @@ describe('Cloudflare authentication gateway', () => {
     expect(isSameOriginWrite('DELETE', new Headers(), origin)).toBe(false)
     expect(isSameOriginWrite('PUT', new Headers({ 'sec-fetch-site': 'same-origin' }), origin)).toBe(true)
     expect(isSameOriginWrite('POST', new Headers({ 'sec-fetch-site': 'same-site' }), origin)).toBe(false)
-  })
-
-  // 許可リスト設定時は列挙されたメールアドレスだけがログインできる
-  it('restricts sign-in to the configured email allowlist', () => {
-    expect(isEmailAllowed('anyone@example.com', '')).toBe(true)
-    expect(isEmailAllowed('Me@Example.com', 'me@example.com, partner@example.com')).toBe(true)
-    expect(isEmailAllowed('stranger@example.com', 'me@example.com')).toBe(false)
   })
 
   // 同一サイト相対パスのみをログイン後遷移先として受理

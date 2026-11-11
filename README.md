@@ -43,7 +43,7 @@ Worker Secret は `secrets/worker.env`（Git 管理外。`secrets/worker.env.exa
 - `NUXT_GOOGLE_CLIENT_ID` / `NUXT_GOOGLE_CLIENT_SECRET` / `NUXT_GOOGLE_REDIRECT_URI`
 - `NUXT_SESSION_SECRET`: 32文字以上。session/OAuth Cookie暗号化用
 - `NUXT_INTERNAL_BINDING_SECRET`: 32文字以上。自宅サーバーの `TASMANE_INTERNAL_BINDING_SECRET` と同値
-- `NUXT_ALLOWED_EMAILS`: ログインを許可する Google アカウント（カンマ区切り）
+- Googleログインは事前のメールアドレス登録不要。Google Cloud OAuth は「外部 / 本番環境」に公開し、必要な検証を完了する。
 - `TASMANE_API`: `cloudflare.config.ts` で定義する Workers VPC Service binding（Cloudflare Tunnel 経由で自宅サーバーの Go API へ）。local開発だけは`NUXT_API_INTERNAL_URL=http://127.0.0.1:8080`へfallbackする
 
 Browserの`/api/v1/**` requestはsession認証（状態変更は同一Originのみ）後にWorkerがVPC Service bindingへ転送する。その際、client由来の全`X-Tasmane-*`およびforwarding headerを除去し、検証済みuser UUIDと内部Binding secretだけを注入する。OAuth callbackは検証済みGoogle subject/profileとrefresh tokenを内部専用`POST /internal/auth/bootstrap`へ送り、Go側でuserをupsertしrefresh tokenをAES-256-GCM暗号化してNeonへ保存する。

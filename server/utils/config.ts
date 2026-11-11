@@ -8,7 +8,6 @@ interface AuthRuntimeConfig {
   sessionSecret: string
   internalBindingSecret: string
   apiInternalUrl: string
-  allowedEmails: string
 }
 
 // 認証ランタイム設定の検証と正規化
@@ -31,7 +30,6 @@ export function authConfig(config: RuntimeConfig): AuthRuntimeConfig {
     sessionSecret: value.sessionSecret,
     internalBindingSecret: value.internalBindingSecret,
     apiInternalUrl: value.apiInternalUrl || '',
-    allowedEmails: value.allowedEmails || '',
   }
 }
 
