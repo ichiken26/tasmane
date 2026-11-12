@@ -46,5 +46,16 @@ export default defineNuxtConfig({
   // Cloudflare向けNitro
   nitro: { preset: 'cloudflare_module' },
   // アプリのhead
-  app: { head: { htmlAttrs: { lang: 'ja' }, meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }] } },
+  app: {
+    head: {
+      htmlAttrs: { lang: 'ja' },
+      meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
+      // タスマネのロゴ（public/ 配下。SVG 非対応環境は ico、iOS ホーム画面は PNG）
+      link: [
+        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'icon', href: '/favicon.ico', sizes: '32x32' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      ],
+    },
+  },
 })

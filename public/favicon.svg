@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">
+  <!-- タスマネ ロゴ（AppLogo.vue と同じ図形。タブの明暗に合わせて上部の輪を切替） -->
+  <style>.ring{stroke:#2b2622}@media (prefers-color-scheme:dark){.ring{stroke:#f7f5f0}}</style>
+  <rect x="4" y="7" width="32" height="29" rx="8" fill="#f97316"/>
+  <rect x="4" y="7" width="32" height="9" rx="4" fill="#2b2622" opacity=".18"/>
+  <path class="ring" d="M13 4v7M27 4v7" stroke-width="3" stroke-linecap="round"/>
+  <path d="m13 25 5 5 9-10" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
