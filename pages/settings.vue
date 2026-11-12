@@ -37,14 +37,14 @@ async function load() {
   loading.value = true
   loadError.value = undefined
   try {
-    const response = await globalThis.fetch('/auth/session', { headers: { accept: 'application/json' } })
+    // ログイン情報と設定を並行に取得
+    const [response, current] = await Promise.all([globalThis.fetch('/auth/session', { headers: { accept: 'application/json' } }), api.settings()])
     if (response.status === 401) {
       globalThis.location.assign('/auth/login?returnTo=%2Fsettings')
       return
     }
     if (!response.ok) throw new Error('profile request failed')
     user.value = ((await response.json()) as { user: AuthUser }).user
-    const current = await api.settings()
     Object.assign(settings, { timezone: current.timezone, googleSyncIntervalMinutes: current.googleSyncIntervalMinutes, memoIntegrationEnabled: current.memoIntegrationEnabled })
     savedSnapshot = JSON.stringify(settings)
   } catch (error) {

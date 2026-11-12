@@ -36,23 +36,15 @@ func (h Handler) addMemoLink(w http.ResponseWriter, r *http.Request) {
 		Title string `json:"title"`
 	}
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	link, err := h.memoLinks().Add(r.Context(), userID, chi.URLParam(r, "taskId"), input.URL, input.Title)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, application.NewMemoLinkView(link))
+	reply(w, http.StatusCreated, application.NewMemoLinkView(link), err)
 }
 
 // メモリンクの解除
 func (h Handler) deleteMemoLink(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
-	if err := h.memoLinks().Remove(r.Context(), userID, chi.URLParam(r, "taskId"), chi.URLParam(r, "linkId")); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.memoLinks().Remove(r.Context(), userID, chi.URLParam(r, "taskId"), chi.URLParam(r, "linkId")))
 }

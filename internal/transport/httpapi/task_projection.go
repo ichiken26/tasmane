@@ -26,9 +26,5 @@ func toProjectedResponses(values []domain.TaskProjection) []taskResponse {
 func (h Handler) writeTask(w http.ResponseWriter, r *http.Request, status int, task domain.Task) {
 	userID, _ := UserID(r.Context())
 	projected, err := h.projections().ProjectTask(r.Context(), userID, task)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, status, toProjectedResponse(projected))
+	reply(w, status, toProjectedResponse(projected), err)
 }

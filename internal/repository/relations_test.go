@@ -55,13 +55,14 @@ func TestPostgresAddDependencyRevalidatesAndPersistsInsideLock(t *testing.T) {
 	}
 }
 
-// グラフ読取SQLの期待設定
+// グラフ読取SQLの期待設定（タスクと依存を1往復で読む）
 func expectGraphRows(mock sqlmock.Sqlmock, first, second []driver.Value, dependencies [][]driver.Value) {
-	mock.ExpectQuery("SELECT id, user_id, genre_id").WithArgs("user-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "genre_id", "parent_id"}).AddRow(first...).AddRow(second...))
-	rows := sqlmock.NewRows([]string{"task_id", "depends_on_task_id"})
-	for _, dependency := range dependencies {
-		rows.AddRow(dependency...)
+	rows := sqlmock.NewRows([]string{"kind", "a", "b", "c", "d"})
+	for _, task := range [][]driver.Value{first, second} {
+		rows.AddRow(append([]driver.Value{"T"}, task...)...)
 	}
-	mock.ExpectQuery("SELECT dependency.task_id").WithArgs("user-1").WillReturnRows(rows)
+	for _, dependency := range dependencies {
+		rows.AddRow("D", dependency[0], dependency[1], "", "")
+	}
+	mock.ExpectQuery("SELECT 'T' AS kind").WithArgs("user-1").WillReturnRows(rows)
 }

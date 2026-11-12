@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"errors"
 	"log"
@@ -11,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	// distroless でもユーザーTimezoneを解決できるようIANA tzdataを同梱
 	"tasmane/db"
 	"tasmane/internal/application"
@@ -31,20 +29,11 @@ func main() {
 		log.Fatal("DATABASE_URL, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and a 32-byte TASMANE_GOOGLE_TOKEN_ENCRYPTION_KEY are required")
 	}
 	// PostgreSQL 接続の確立
-	database, err := sql.Open("pgx", databaseURL)
+	database, err := db.OpenMigrated(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	startup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := database.PingContext(startup); err != nil {
-		log.Fatal(err)
-	}
-	// 起動時マイグレーションの適用
-	if err := db.Migrate(startup, database); err != nil {
-		log.Fatal(err)
-	}
 	cipher, err := googleintegration.NewTokenCipher(key)
 	if err != nil {
 		log.Fatal(err)

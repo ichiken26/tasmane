@@ -31,8 +31,9 @@ async function load() {
   loading.value = true
   loadError.value = undefined
   try {
-    tasks.value = await api.deletedTasks()
-    if (!loaded.value) { genres.value = await api.genres(); loaded.value = true }
+    const [deleted, genreRows] = await Promise.all([api.deletedTasks(), loaded.value ? undefined : api.genres()])
+    tasks.value = deleted
+    if (genreRows) { genres.value = genreRows; loaded.value = true }
   } catch (error) { loadError.value = error }
   finally { loading.value = false }
 }

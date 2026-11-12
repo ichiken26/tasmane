@@ -48,11 +48,11 @@ async function load() {
   loading.value = true
   loadError.value = undefined
   try {
-    const [current, conflictRows, importRows] = await Promise.all([api.googleStatus(), api.googleConflicts(), api.googleImportCandidates()])
+    const [current, conflictRows, importRows, genreRows] = await Promise.all([api.googleStatus(), api.googleConflicts(), api.googleImportCandidates(), genresLoaded.value ? undefined : api.genres()])
     status.value = current
     conflicts.value = conflictRows
     imports.value = importRows
-    if (!genresLoaded.value) { genres.value = await api.genres(); genresLoaded.value = true }
+    if (genreRows) { genres.value = genreRows; genresLoaded.value = true }
   } catch (error) { loadError.value = error }
   finally { loading.value = false }
 }

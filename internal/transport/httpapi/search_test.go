@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"tasmane/internal/application"
 	"tasmane/internal/domain"
 	"tasmane/internal/repository"
@@ -17,12 +18,16 @@ import (
 type searchRepositoryStub struct {
 	*repository.Memory
 	tasks    []domain.Task
+	mu       sync.Mutex
 	searches []domain.TaskSearch
 }
 
 // 検索条件の記録とジャンル絞り込み
 func (s *searchRepositoryStub) Search(_ context.Context, _ string, search domain.TaskSearch) ([]domain.Task, error) {
+	// 一致判定と投影は並行に呼ばれる
+	s.mu.Lock()
 	s.searches = append(s.searches, search)
+	s.mu.Unlock()
 	result := []domain.Task{}
 	for _, task := range s.tasks {
 		if len(search.GenreIDs) == 0 || containsString(search.GenreIDs, task.GenreID) {
@@ -131,8 +136,10 @@ func TestSearchTasksReadsGenreIDsQueryParameter(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := stub.searches[0].GenreIDs; !reflect.DeepEqual(got, []string{"g1", "g2"}) {
-		t.Fatalf("genreIds not forwarded: %#v", got)
+	for _, search := range stub.searches {
+		if got := search.GenreIDs; !reflect.DeepEqual(got, []string{"g1", "g2"}) {
+			t.Fatalf("genreIds not forwarded: %#v", got)
+		}
 	}
 	if len(tasks) != 3 {
 		t.Fatalf("expected OR match across genres, got %v", responseIDs(tasks))

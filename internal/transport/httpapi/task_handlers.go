@@ -58,7 +58,7 @@ func (h Handler) transitionTask(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var input transitionRequest
 	if err := decodeJSON(w, r, &input); err != nil || input.UserID != "" || input.ExpectedVersion < 1 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	output, err := h.taskCommands().Transition(r.Context(), userID, chi.URLParam(r, "taskId"), input.ExpectedVersion, input.ToStatus, requestVia(r), tokenValue(input.ImpactToken))
@@ -89,7 +89,7 @@ func (h Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var input patchTaskRequest
 	if decodeJSON(w, r, &input) != nil || input.ExpectedVersion < 1 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	result, err := h.taskCommands().Update(r.Context(), userID, chi.URLParam(r, "taskId"), input.ExpectedVersion, func(current domain.Task) (domain.Task, error) {
@@ -114,7 +114,7 @@ func (h Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var input createTaskRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	isAllDay := true
@@ -145,7 +145,7 @@ func (h Handler) setTaskProgress(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var input progressRequest
 	if decodeJSON(w, r, &input) != nil || input.Progress == nil || input.ExpectedVersion < 1 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	updated, err := h.taskCommands().SetProgress(r.Context(), userID, chi.URLParam(r, "taskId"), input.ExpectedVersion, *input.Progress, requestVia(r))
@@ -190,11 +190,7 @@ func (h Handler) listDeletedTasks(w http.ResponseWriter, r *http.Request) {
 func (h Handler) restoreTask(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	ids, err := h.taskCommands().Restore(r.Context(), userID, chi.URLParam(r, "taskId"))
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string][]string{"restoredTaskIds": ids})
+	reply(w, http.StatusOK, map[string][]string{"restoredTaskIds": ids}, err)
 }
 
 // 変更経路（Worker が WebMCP 由来の操作に限り付与、それ以外は WEB）

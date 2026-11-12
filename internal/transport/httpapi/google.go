@@ -18,12 +18,7 @@ func (h Handler) triggerGoogleSync(w http.ResponseWriter, r *http.Request) {
 	// 認証ユーザーの取得
 	userID, _ := UserID(r.Context())
 	// 同期トリガーユースケースの呼び出し
-	if err := h.GoogleJobs.Trigger(r.Context(), userID); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 受理レスポンスの書き出し
-	w.WriteHeader(http.StatusAccepted)
+	reply(w, http.StatusAccepted, nil, h.GoogleJobs.Trigger(r.Context(), userID))
 }
 
 // Google同期衝突一覧の取得
@@ -32,12 +27,7 @@ func (h Handler) listGoogleConflicts(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	// 衝突一覧ユースケースの呼び出し
 	values, err := h.GoogleQueries.Conflicts(r.Context(), userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 衝突一覧レスポンスの書き出し
-	writeJSON(w, http.StatusOK, values)
+	reply(w, http.StatusOK, values, err)
 }
 
 // Google取込候補一覧の取得
@@ -46,12 +36,7 @@ func (h Handler) listGoogleImportCandidates(w http.ResponseWriter, r *http.Reque
 	userID, _ := UserID(r.Context())
 	// 取込候補ユースケースの呼び出し
 	values, err := h.GoogleQueries.ImportCandidates(r.Context(), userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 取込候補レスポンスの書き出し
-	writeJSON(w, http.StatusOK, values)
+	reply(w, http.StatusOK, values, err)
 }
 
 // コンフリクト解決のリクエスト本体
@@ -64,14 +49,10 @@ func (h Handler) resolveGoogleConflict(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var input resolveConflictRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
-	if err := h.GoogleQueries.Resolve(r.Context(), userID, chi.URLParam(r, "taskId"), input.Resolution); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.GoogleQueries.Resolve(r.Context(), userID, chi.URLParam(r, "taskId"), input.Resolution))
 }
 
 // 取込候補取込のリクエスト本体
@@ -86,7 +67,7 @@ func (h Handler) importGoogleCandidate(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	var input importCandidateRequest
 	if decodeJSON(w, r, &input) != nil || input.GoogleTaskListID == "" || input.GoogleTaskID == "" || input.GenreID == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	repository, ok := h.GoogleQueries.Repo.(application.GoogleImportRepository)
@@ -143,11 +124,7 @@ func shouldCheckAutoSync(userID string, now time.Time) bool {
 func (h Handler) getGoogleStatus(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	status, err := h.GoogleQueries.Status(r.Context(), userID)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, status)
+	reply(w, http.StatusOK, status, err)
 }
 
 // 専用 Task List の作り直し（復旧フロー）

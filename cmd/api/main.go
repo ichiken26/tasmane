@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"errors"
 	"log"
@@ -12,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	// distroless でもユーザーTimezoneを解決できるようIANA tzdataを同梱
 	"tasmane/db"
 	"tasmane/internal/application"
@@ -41,20 +39,11 @@ func main() {
 		log.Fatal(err)
 	}
 	// PostgreSQL 接続の確立
-	database, err := sql.Open("pgx", databaseURL)
+	database, err := db.OpenMigrated(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	startupContext, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelStartup()
-	if err := database.PingContext(startupContext); err != nil {
-		log.Fatal(err)
-	}
-	// 起動時マイグレーションの適用
-	if err := db.Migrate(startupContext, database); err != nil {
-		log.Fatal(err)
-	}
 
 	// 内部 API ルータとハンドラの組み立て
 	store := repository.NewPostgres(database, nil)

@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"os"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"tasmane/db"
 	"tasmane/internal/application"
 )
@@ -20,16 +18,13 @@ func main() {
 		log.Fatal("DATABASE_URL is required")
 	}
 	// PostgreSQL 接続の確立
-	database, err := sql.Open("pgx", databaseURL)
+	ctx := context.Background()
+	// 接続とマイグレーション
+	database, err := db.OpenMigrated(ctx, databaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	ctx := context.Background()
-	// 起動時マイグレーションの適用
-	if err := db.Migrate(ctx, database); err != nil {
-		log.Fatal(err)
-	}
 	// 期限切れタスクの物理削除
 	count, err := (application.Cleanup{DB: database}).HardDeleteExpiredTasks(ctx, time.Now().UTC())
 	if err != nil {

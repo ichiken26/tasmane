@@ -108,25 +108,37 @@ func (p *Postgres) ListConfirmations(ctx context.Context, userID, taskID string)
 	return confirmations, nil
 }
 
-// 複数タスクの確認事項一括取得（投影用・N+1回避）
+// 複数タスクの確認事項一括取得（N+1回避）
 func (p *Postgres) ListConfirmationsForTasks(ctx context.Context, userID string, taskIDs []string) (map[string][]domain.Confirmation, error) {
+	if len(taskIDs) == 0 && p != nil && p.database != nil && userID != "" {
+		return map[string][]domain.Confirmation{}, nil
+	}
+	return p.listConfirmationsWhere(ctx, userID, `confirmation.task_id=ANY($2::uuid[])`, taskIDs)
+}
+
+// ジャンル単位（空なら全ジャンル）の確認事項一括取得（投影用。タスク一覧と並行に読める）
+func (p *Postgres) ListConfirmationsForGenres(ctx context.Context, userID string, genreIDs []string) (map[string][]domain.Confirmation, error) {
+	return p.listConfirmationsWhere(ctx, userID, `(cardinality($2::uuid[])=0 OR task.genre_id=ANY($2::uuid[]))`, genreIDs)
+}
+
+// 削除済みタスクを除いた確認事項のタスク別一括取得
+func (p *Postgres) listConfirmationsWhere(ctx context.Context, userID, filter string, ids []string) (map[string][]domain.Confirmation, error) {
 	if p == nil || p.database == nil || userID == "" {
 		return nil, domain.ErrForbidden
 	}
-	result := make(map[string][]domain.Confirmation, len(taskIDs))
-	if len(taskIDs) == 0 {
-		return result, nil
+	if ids == nil {
+		ids = []string{}
 	}
-	// 確認事項行の一括取得
 	rows, err := p.database.QueryContext(ctx, `SELECT `+confirmationSelectColumns+`
     FROM task_confirmations confirmation
     JOIN tasks task ON task.id=confirmation.task_id AND task.user_id=confirmation.user_id
-    WHERE confirmation.user_id=$1 AND confirmation.task_id=ANY($2::uuid[]) AND task.deleted_at IS NULL
-    ORDER BY confirmation.created_at, confirmation.id`, userID, taskIDs)
+    WHERE confirmation.user_id=$1 AND `+filter+` AND task.deleted_at IS NULL
+    ORDER BY confirmation.created_at, confirmation.id`, userID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("list confirmations for tasks: %w", err)
+		return nil, fmt.Errorf("list confirmations: %w", err)
 	}
 	defer rows.Close()
+	result := map[string][]domain.Confirmation{}
 	for rows.Next() {
 		confirmation, err := scanConfirmation(rows)
 		if err != nil {
@@ -135,7 +147,7 @@ func (p *Postgres) ListConfirmationsForTasks(ctx context.Context, userID string,
 		result[confirmation.TaskID] = append(result[confirmation.TaskID], confirmation)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list confirmations for tasks: %w", err)
+		return nil, fmt.Errorf("list confirmations: %w", err)
 	}
 	return result, nil
 }

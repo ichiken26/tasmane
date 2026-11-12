@@ -1,4 +1,5 @@
 import { shouldRedirectToLogin } from './loginRedirect'
+import { shareInFlight } from './inFlight'
 import { onMounted } from 'vue'
 import { useAsyncData, useRequestFetch, useRuntimeConfig } from '#app'
 import { schedulePrefetch } from './criticalOrder'
@@ -30,6 +31,8 @@ export interface GoogleImportCandidate { googleTaskListId: string; googleTaskId:
 
 type RequestOptions = { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; headers?: Record<string, string>; body?: Record<string, unknown>; query?: Record<string, unknown> }
 const enc = encodeURIComponent
+// 実行中のGET（タブ内で共有）
+const inFlightGets = new Map<string, Promise<unknown>>()
 // 変更系APIの成功時に window へ送るイベント名
 export const DATA_CHANGED_EVENT = 'tasmane:data-changed'
 
@@ -38,7 +41,7 @@ export function useTasmaneApi() {
   const config = useRuntimeConfig()
   const baseURL = String(config.public.apiBase || '/api/v1')
   const requestFetch = useRequestFetch()
-  const request = <T>(path: string, options: RequestOptions = {}) => requestFetch<T>(path, {
+  const send = <T>(path: string, options: RequestOptions = {}) => requestFetch<T>(path, {
     ...options,
     baseURL,
     onResponse({ response }) {
@@ -50,6 +53,10 @@ export function useTasmaneApi() {
         globalThis.location.assign(`/auth/login?returnTo=${enc(globalThis.location.pathname + globalThis.location.search)}`)
     },
   }) as Promise<T>
+  // 同時に呼ばれた同じGET（画面とフッターのダッシュボード、各部品の設定など）は通信1回にまとめる
+  const request = <T>(path: string, options: RequestOptions = {}) => !options.method || options.method === 'GET'
+    ? shareInFlight(inFlightGets, `${path}?${JSON.stringify(options.query ?? {})}`, () => send<T>(path, options))
+    : send<T>(path, options)
   return {
     task: (id: string) => request<ApiTask>(`/tasks/${enc(id)}`),
     tree: (id: string) => request<ApiTask[]>(`/tasks/${enc(id)}/tree`),

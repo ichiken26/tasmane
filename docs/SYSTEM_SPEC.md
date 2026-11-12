@@ -203,6 +203,12 @@ Neon PostgreSQL
 
 正確なスキーマは `api/openapi.yaml`（ルータとの一致はテスト `TestRouterMatchesOpenAPIOperations` で保証）。
 
+性能（Neon は遠隔で1往復 約100ms のため、往復回数を最小にする）:
+- 接続は `db.Open` / `db.OpenMigrated` に集約。プール最大16本・待機16本を保ち（アイドル4分・寿命30分）、pgx は `QueryExecModeExec`（prepare の往復なしで常に1往復）を既定にする。URL に `default_query_exec_mode` を書けばそれを優先。JSON 列へは文字列で渡す（`[]byte` は bytea 扱いになる）。
+- 投影（ダッシュボード・検索・タスク詳細・ツリー）はタスク・依存グラフ・確認事項（ジャンル単位）を goroutine で並行取得し1往復。ダッシュボードの助言、検索の一致判定も並行。依存グラフは `UNION ALL` の1 SQL、Google 同期状態も1 SQL。
+- フロントは同時に発生した同じ GET を1回の通信にまとめる（`shareInFlight`）。
+- google-worker はユーザー・タスク単位の直列性（Google 側の二重作成防止）を保つため1本で消費する。
+
 | メソッド・パス | 用途 |
 |---|---|
 | `GET /v1/tasks` | 検索（`q`, `genreIds`, `priority`=実効優先度, `deadline`=today/tomorrow/week/month/later/overdue, `sort`=taskScore/priority/deadline） |

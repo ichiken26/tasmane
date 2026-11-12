@@ -105,6 +105,16 @@ func TestPostgresHierarchyLifecycleAgainstFreshSchema(t *testing.T) {
 	if err != nil || len(batch[child]) != 1 || len(batch[parent]) != 0 {
 		t.Fatalf("batch confirmations=%+v err=%v", batch, err)
 	}
+	// ジャンル単位（空なら全ジャンル）の一括取得は、タスク一覧を待たずに投影へ渡せる
+	for _, genres := range [][]string{nil, {genre}} {
+		byGenre, err := repo.ListConfirmationsForGenres(ctx, userID, genres)
+		if err != nil || len(byGenre[child]) != 1 || len(byGenre[parent]) != 0 {
+			t.Fatalf("genre confirmations(%v)=%+v err=%v", genres, byGenre, err)
+		}
+	}
+	if other, err := repo.ListConfirmationsForGenres(ctx, userID, []string{"01890f3e-4c00-7000-8000-0000000003ff"}); err != nil || len(other) != 0 {
+		t.Fatalf("other genre confirmations=%+v err=%v", other, err)
+	}
 
 	// 付け替え: 完了済み親は禁止、葉は承認必須
 	looseTask, err := repo.Get(ctx, userID, loose)

@@ -13,15 +13,16 @@ type graphQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-const graphTasksSQL = `SELECT id, user_id, genre_id, COALESCE(parent_task_id::text, '') AS parent_id
-FROM tasks WHERE user_id=$1 AND deleted_at IS NULL ORDER BY id`
-
-const graphDependenciesSQL = `SELECT dependency.task_id, dependency.depends_on_task_id
+// グラフのタスク（T）と依存（D）を1往復で読む（トランザクション内でも往復を減らす）
+const graphSQL = `SELECT 'T' AS kind, id::text, user_id::text, genre_id::text, COALESCE(parent_task_id::text, '')
+FROM tasks WHERE user_id=$1 AND deleted_at IS NULL
+UNION ALL
+SELECT 'D', dependency.task_id::text, dependency.depends_on_task_id::text, '', ''
 FROM task_dependencies dependency
 JOIN tasks task ON task.id=dependency.task_id AND task.user_id=dependency.user_id
 JOIN tasks required ON required.id=dependency.depends_on_task_id AND required.user_id=dependency.user_id
 WHERE dependency.user_id=$1 AND task.deleted_at IS NULL AND required.deleted_at IS NULL
-ORDER BY dependency.task_id, dependency.depends_on_task_id`
+ORDER BY 1, 2, 3`
 
 // ユーザーグラフの読取
 func (p *Postgres) LoadGraph(ctx context.Context, userID string) ([]domain.GraphTask, []domain.Dependency, error) {
@@ -33,44 +34,25 @@ func (p *Postgres) LoadGraph(ctx context.Context, userID string) ([]domain.Graph
 
 // グラフタスクと依存の読取
 func loadGraph(ctx context.Context, querier graphQuerier, userID string) ([]domain.GraphTask, []domain.Dependency, error) {
-	// グラフタスクの取得
-	rows, err := querier.QueryContext(ctx, graphTasksSQL, userID)
+	rows, err := querier.QueryContext(ctx, graphSQL, userID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load graph tasks: %w", err)
-	}
-	tasks := []domain.GraphTask{}
-	for rows.Next() {
-		var task domain.GraphTask
-		// グラフタスク行のスキャン
-		if err := rows.Scan(&task.ID, &task.UserID, &task.GenreID, &task.ParentID); err != nil {
-			rows.Close()
-			return nil, nil, fmt.Errorf("scan graph task: %w", err)
-		}
-		tasks = append(tasks, task)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, nil, fmt.Errorf("load graph tasks: %w", err)
-	}
-	rows.Close()
-
-	// 依存行の取得
-	rows, err = querier.QueryContext(ctx, graphDependenciesSQL, userID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load dependencies: %w", err)
+		return nil, nil, fmt.Errorf("load graph: %w", err)
 	}
 	defer rows.Close()
-	dependencies := []domain.Dependency{}
+	tasks, dependencies := []domain.GraphTask{}, []domain.Dependency{}
 	for rows.Next() {
-		var dependency domain.Dependency
-		// 依存行のスキャン
-		if err := rows.Scan(&dependency.TaskID, &dependency.DependsOnTaskID); err != nil {
-			return nil, nil, fmt.Errorf("scan dependency: %w", err)
+		var kind, a, b, c, d string
+		if err := rows.Scan(&kind, &a, &b, &c, &d); err != nil {
+			return nil, nil, fmt.Errorf("scan graph: %w", err)
 		}
-		dependencies = append(dependencies, dependency)
+		if kind == "T" {
+			tasks = append(tasks, domain.GraphTask{ID: a, UserID: b, GenreID: c, ParentID: d})
+		} else {
+			dependencies = append(dependencies, domain.Dependency{TaskID: a, DependsOnTaskID: b})
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("load dependencies: %w", err)
+		return nil, nil, fmt.Errorf("load graph: %w", err)
 	}
 	return tasks, dependencies, nil
 }

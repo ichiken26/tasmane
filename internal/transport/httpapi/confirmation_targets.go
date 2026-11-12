@@ -35,23 +35,15 @@ func (h Handler) createConfirmationTarget(w http.ResponseWriter, r *http.Request
 		Name string `json:"name"`
 	}
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	value, err := h.confirmationTargets().Create(r.Context(), userID, input.Name)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, application.NamedView{ID: value.ID, Name: value.Name})
+	reply(w, http.StatusCreated, application.NamedView{ID: value.ID, Name: value.Name}, err)
 }
 
 // 確認先プリセットの削除
 func (h Handler) deleteConfirmationTarget(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
-	if err := h.confirmationTargets().Delete(r.Context(), userID, chi.URLParam(r, "targetId")); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.confirmationTargets().Delete(r.Context(), userID, chi.URLParam(r, "targetId")))
 }

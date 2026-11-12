@@ -5,12 +5,14 @@ import (
 	"errors"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"tasmane/internal/domain"
 )
 
-// 確認事項一括取得の任意境界（未実装リポジトリはタスク単位取得へフォールバック）
-type ConfirmationBatchRepository interface {
-	ListConfirmationsForTasks(context.Context, string, []string) (map[string][]domain.Confirmation, error)
+// 確認事項のジャンル単位一括取得（タスク一覧を待たずに並行取得できる。未実装ならタスク単位へフォールバック）
+type ConfirmationGenreRepository interface {
+	ListConfirmationsForGenres(context.Context, string, []string) (map[string][]domain.Confirmation, error)
 }
 
 // 算出値付きタスク投影のユースケース（HTTP/MCP/WebMCP共通）
@@ -37,20 +39,38 @@ func (p Projections) Project(ctx context.Context, userID string, genreIDs []stri
 	if p.Now != nil {
 		now = p.Now().UTC()
 	}
-	// 投影対象タスクの読み出し
-	tasks, err := p.Tasks.Search(ctx, userID, domain.TaskSearch{GenreIDs: genreIDs})
-	if err != nil {
+	// 投影の入力（タスク・依存グラフ・確認事項）を並行に読み出す（遠隔DBの往復を1回分に）
+	var (
+		tasks         []domain.Task
+		dependencies  []domain.Dependency
+		confirmations map[string][]domain.Confirmation
+	)
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() (err error) {
+		tasks, err = p.Tasks.Search(groupCtx, userID, domain.TaskSearch{GenreIDs: genreIDs})
+		return err
+	})
+	if p.Relations.Repo != nil {
+		group.Go(func() (err error) {
+			_, dependencies, err = p.Relations.Snapshot(groupCtx, userID)
+			return err
+		})
+	}
+	batch, batched := p.Confirmations.Repo.(ConfirmationGenreRepository)
+	if batched {
+		group.Go(func() (err error) {
+			confirmations, err = batch.ListConfirmationsForGenres(groupCtx, userID, genreIDs)
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
 		return ProjectionResult{}, err
 	}
-	var dependencies []domain.Dependency
-	if p.Relations.Repo != nil {
-		if _, dependencies, err = p.Relations.Snapshot(ctx, userID); err != nil {
+	if !batched {
+		var err error
+		if confirmations, err = p.loadConfirmations(ctx, userID, tasks); err != nil {
 			return ProjectionResult{}, err
 		}
-	}
-	confirmations, err := p.loadConfirmations(ctx, userID, tasks)
-	if err != nil {
-		return ProjectionResult{}, err
 	}
 	// 共通ドメイン投影の実行
 	projected, err := domain.ProjectTasks(domain.ProjectionInput{Tasks: tasks, Dependencies: dependencies, Confirmations: confirmations, Now: now})
@@ -115,19 +135,12 @@ func (p Projections) loadConfirmations(ctx context.Context, userID string, tasks
 	if p.Confirmations.Repo == nil || len(tasks) == 0 {
 		return result, nil
 	}
-	ids := make([]string, 0, len(tasks))
 	for _, task := range tasks {
-		ids = append(ids, task.ID)
-	}
-	if batch, ok := p.Confirmations.Repo.(ConfirmationBatchRepository); ok {
-		return batch.ListConfirmationsForTasks(ctx, userID, ids)
-	}
-	for _, id := range ids {
-		values, err := p.Confirmations.List(ctx, userID, id)
+		values, err := p.Confirmations.List(ctx, userID, task.ID)
 		if err != nil {
 			return nil, err
 		}
-		result[id] = values
+		result[task.ID] = values
 	}
 	return result, nil
 }
@@ -158,14 +171,21 @@ func (p Projections) Search(ctx context.Context, userID string, search Projected
 	if search.Priority != nil && *search.Priority != domain.HighPriority && *search.Priority != domain.MediumPriority && *search.Priority != domain.LowPriority {
 		return nil, domain.ErrInvalidPriority
 	}
-	// 文字列・ジャンル・期限の絞り込み（優先度は実効優先度で後段）
-	matched, err := p.Tasks.Search(ctx, userID, domain.TaskSearch{Query: search.Query, GenreIDs: search.GenreIDs, Deadline: search.Deadline})
-	if err != nil {
-		return nil, err
-	}
-	// 階層・依存を含めるため同ジャンル全体で投影
-	result, err := p.Project(ctx, userID, search.GenreIDs)
-	if err != nil {
+	// 文字列・ジャンル・期限の絞り込み（優先度は実効優先度で後段）と、階層・依存を含めた同ジャンル全体の投影を並行に
+	var (
+		matched []domain.Task
+		result  ProjectionResult
+	)
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() (err error) {
+		matched, err = p.Tasks.Search(groupCtx, userID, domain.TaskSearch{Query: search.Query, GenreIDs: search.GenreIDs, Deadline: search.Deadline})
+		return err
+	})
+	group.Go(func() (err error) {
+		result, err = p.Project(groupCtx, userID, search.GenreIDs)
+		return err
+	})
+	if err := group.Wait(); err != nil {
 		return nil, err
 	}
 	byID := make(map[string]domain.TaskProjection, len(result.Tasks))

@@ -169,8 +169,16 @@ func (p *Postgres) SaveGoogleTaskSync(ctx context.Context, value GoogleTaskSync)
 	_, err := p.database.ExecContext(ctx, `INSERT INTO google_task_syncs(id,user_id,task_id,google_task_list_id,google_task_id,last_synced_at,status,last_synced_snapshot)
     VALUES($1,$2,$3,$4,$5,now(),'SYNCED',$6)
     ON CONFLICT(user_id,google_task_list_id,google_task_id) DO UPDATE SET task_id=COALESCE(EXCLUDED.task_id,google_task_syncs.task_id),last_synced_at=now(),status='SYNCED',last_synced_snapshot=EXCLUDED.last_synced_snapshot,last_error_code=NULL,last_error_message=NULL`,
-		value.ID, value.UserID, taskID, value.GoogleTaskListID, value.GoogleTaskID, value.Snapshot)
+		value.ID, value.UserID, taskID, value.GoogleTaskListID, value.GoogleTaskID, jsonParam(value.Snapshot))
 	return err
+}
+
+// JSON 列への引数（[]byte は bytea として送られるため文字列で渡す。空は NULL）
+func jsonParam(value []byte) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return string(value)
 }
 
 // タスク同期対応の切断
@@ -187,12 +195,8 @@ func (p *Postgres) RecordGoogleConflict(ctx context.Context, userID, taskID, cod
 
 // Google競合の記録（Google側値の保存付き）
 func (p *Postgres) RecordGoogleConflictWithRemote(ctx context.Context, userID, taskID, code, message string, remote []byte) error {
-	var snapshot any
-	if len(remote) > 0 {
-		snapshot = remote
-	}
 	// 競合状態の更新
-	result, err := p.database.ExecContext(ctx, `UPDATE google_task_syncs SET status='CONFLICT',last_error_code=$1,last_error_message=$2,conflict_remote_snapshot=$5 WHERE user_id=$3 AND task_id=$4`, code, message, userID, taskID, snapshot)
+	result, err := p.database.ExecContext(ctx, `UPDATE google_task_syncs SET status='CONFLICT',last_error_code=$1,last_error_message=$2,conflict_remote_snapshot=$5 WHERE user_id=$3 AND task_id=$4`, code, message, userID, taskID, jsonParam(remote))
 	if err != nil {
 		return fmt.Errorf("record google conflict: %w", err)
 	}
@@ -505,11 +509,20 @@ func (p *Postgres) AcquireDueGoogleSync(ctx context.Context, userID string, now 
 	return p.AcquireGoogleSyncLock(ctx, userID, now, lock)
 }
 
-// Google連携の同期状態（UI表示・手動再同期用）
+// Google連携の同期状態（UI表示・手動再同期用。件数と失敗一覧も1往復で読む）
 func (p *Postgres) GoogleSyncStatus(ctx context.Context, userID string) (domain.GoogleSyncStatus, error) {
 	status := domain.GoogleSyncStatus{Failed: []domain.GoogleFailedTask{}}
 	var finished, missing sql.NullTime
-	err := p.database.QueryRowContext(ctx, `SELECT last_sync_finished_at, task_list_missing_at FROM google_integrations WHERE user_id=$1`, userID).Scan(&finished, &missing)
+	var failed []byte
+	err := p.database.QueryRowContext(ctx, `SELECT integration.last_sync_finished_at, integration.task_list_missing_at,
+    (SELECT count(*) FROM google_task_syncs WHERE user_id=$1 AND status='CONFLICT'),
+    (SELECT count(*) FROM google_sync_jobs WHERE user_id=$1),
+    (SELECT COALESCE(json_agg(json_build_object('taskId', f.task_id, 'title', f.title, 'message', f.message)), '[]') FROM (
+      SELECT sync.task_id, task.title, COALESCE(sync.last_error_message,'') AS message
+      FROM google_task_syncs sync JOIN tasks task ON task.id=sync.task_id AND task.user_id=sync.user_id
+      WHERE sync.user_id=$1 AND sync.status='FAILED' AND task.deleted_at IS NULL ORDER BY sync.updated_at DESC LIMIT 50) f)
+    FROM google_integrations integration WHERE integration.user_id=$1`, userID).
+		Scan(&finished, &missing, &status.ConflictCount, &status.PendingJobs, &failed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return status, nil
 	}
@@ -521,27 +534,10 @@ func (p *Postgres) GoogleSyncStatus(ctx context.Context, userID string) (domain.
 	if finished.Valid {
 		status.LastSyncFinishedAt = &finished.Time
 	}
-	if err := p.database.QueryRowContext(ctx, `SELECT count(*) FROM google_task_syncs WHERE user_id=$1 AND status='CONFLICT'`, userID).Scan(&status.ConflictCount); err != nil {
-		return status, fmt.Errorf("count google conflicts: %w", err)
+	if err := json.Unmarshal(failed, &status.Failed); err != nil {
+		return status, fmt.Errorf("decode failed google tasks: %w", err)
 	}
-	if err := p.database.QueryRowContext(ctx, `SELECT count(*) FROM google_sync_jobs WHERE user_id=$1`, userID).Scan(&status.PendingJobs); err != nil {
-		return status, fmt.Errorf("count google jobs: %w", err)
-	}
-	rows, err := p.database.QueryContext(ctx, `SELECT sync.task_id, task.title, COALESCE(sync.last_error_message,'')
-    FROM google_task_syncs sync JOIN tasks task ON task.id=sync.task_id AND task.user_id=sync.user_id
-    WHERE sync.user_id=$1 AND sync.status='FAILED' AND task.deleted_at IS NULL ORDER BY sync.updated_at DESC LIMIT 50`, userID)
-	if err != nil {
-		return status, fmt.Errorf("list failed google tasks: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var value domain.GoogleFailedTask
-		if err := rows.Scan(&value.TaskID, &value.Title, &value.Message); err != nil {
-			return status, err
-		}
-		status.Failed = append(status.Failed, value)
-	}
-	return status, rows.Err()
+	return status, nil
 }
 
 // 最終FAILEDタスクの手動再同期投入

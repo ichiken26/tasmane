@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/errgroup"
 	"tasmane/internal/application"
 	"tasmane/internal/domain"
 )
@@ -129,12 +130,35 @@ func (h Handler) getGenreDashboard(w http.ResponseWriter, r *http.Request) {
 
 // ダッシュボード投影の組み立てと応答
 func (h Handler) writeDashboard(w http.ResponseWriter, r *http.Request, genres []string) {
-	// 認証ユーザーの取得
 	userID, _ := UserID(r.Context())
 	now := time.Now().UTC()
-	// スコア付きタスク投影の組み立て
-	scored, err := h.scoreTasks(r.Context(), userID, genres, now)
-	if err != nil {
+	var genreID *string
+	if len(genres) == 1 {
+		genreID = &genres[0]
+	}
+	// タスク投影と助言は独立なので並行に読み出す
+	var (
+		scored scoredTasks
+		advice *adviceResponse
+	)
+	group, ctx := errgroup.WithContext(r.Context())
+	group.Go(func() (err error) {
+		scored, err = h.scoreTasks(ctx, userID, genres, now)
+		return err
+	})
+	if h.Advices.Repo != nil {
+		group.Go(func() error {
+			current, err := h.Advices.Current(ctx, userID, genreID)
+			if err == nil {
+				advice = &adviceResponse{Content: current.Content, GeneratedAt: current.GeneratedAt}
+			}
+			if errors.Is(err, domain.ErrForbidden) {
+				return nil
+			}
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -143,27 +167,7 @@ func (h Handler) writeDashboard(w http.ResponseWriter, r *http.Request, genres [
 		titles[task.ID] = task.Title
 	}
 	recommendedConfirmations, err := projectDashboardConfirmations(scored.responses, scored.confirmations, titles, now)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	projected := scored.responses
-	var genreID *string
-	if len(genres) == 1 {
-		genreID = &genres[0]
-	}
-	var advice *adviceResponse
-	if h.Advices.Repo != nil {
-		current, adviceErr := h.Advices.Current(r.Context(), userID, genreID)
-		if adviceErr == nil {
-			advice = &adviceResponse{Content: current.Content, GeneratedAt: current.GeneratedAt}
-		} else if !errors.Is(adviceErr, domain.ErrForbidden) {
-			writeDomainError(w, adviceErr)
-			return
-		}
-	}
-	// ダッシュボードレスポンスの書き出し
-	writeJSON(w, http.StatusOK, dashboardResponse{Tasks: projected, Confirmations: recommendedConfirmations, Advice: advice})
+	reply(w, http.StatusOK, dashboardResponse{Tasks: scored.responses, Confirmations: recommendedConfirmations, Advice: advice}, err)
 }
 
 // スコア付きタスク投影
@@ -223,16 +227,11 @@ func (h Handler) addDependency(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input dependencyRequest
 	if decodeJSON(w, r, &input) != nil || input.DependsOnTaskID == "" || input.ExpectedVersion < 1 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// 依存関係追加ユースケースの呼び出し
-	if err := h.Relations.AddDependency(r.Context(), userID, chi.URLParam(r, "taskId"), input.DependsOnTaskID, input.ExpectedVersion); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 作成レスポンスの書き出し
-	w.WriteHeader(http.StatusCreated)
+	reply(w, http.StatusCreated, nil, h.Relations.AddDependency(r.Context(), userID, chi.URLParam(r, "taskId"), input.DependsOnTaskID, input.ExpectedVersion))
 }
 
 // タスク依存関係の削除
@@ -241,7 +240,7 @@ func (h Handler) removeDependency(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	expectedVersion, err := strconv.ParseInt(r.URL.Query().Get("expectedVersion"), 10, 64)
 	if err != nil || expectedVersion < 1 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	taskID := chi.URLParam(r, "taskId")
@@ -255,12 +254,7 @@ func (h Handler) removeDependency(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 依存関係削除ユースケースの呼び出し
-	if err := h.Relations.RemoveDependency(r.Context(), userID, taskID, chi.URLParam(r, "dependsOnTaskId")); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 削除レスポンスの書き出し
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.Relations.RemoveDependency(r.Context(), userID, taskID, chi.URLParam(r, "dependsOnTaskId")))
 }
 
 // ユーザー設定の応答
@@ -305,7 +299,7 @@ func (h Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input patchSettingsRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	if input.Timezone != nil {
@@ -384,17 +378,12 @@ func (h Handler) createConfirmation(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input createConfirmationRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// 確認事項作成ユースケースの呼び出し
 	value, err := h.Confirmations.Create(r.Context(), userID, chi.URLParam(r, "taskId"), input.Content, input.TargetName, input.DueAt)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 作成レスポンスの書き出し
-	writeJSON(w, http.StatusCreated, toConfirmationResponse(value))
+	reply(w, http.StatusCreated, toConfirmationResponse(value), err)
 }
 
 // 確認事項ステータスの更新
@@ -404,7 +393,7 @@ func (h Handler) updateConfirmation(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input updateConfirmationRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// 確認事項遷移ユースケースの呼び出し
@@ -470,17 +459,12 @@ func (h Handler) createGenre(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input nameRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// ジャンル作成ユースケースの呼び出し
 	value, err := h.Catalog.CreateGenre(r.Context(), userID, input.Name)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 作成レスポンスの書き出し
-	writeJSON(w, http.StatusCreated, genreResponse(value))
+	reply(w, http.StatusCreated, genreResponse(value), err)
 }
 
 // ジャンルの取得
@@ -489,12 +473,7 @@ func (h Handler) getGenre(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	// ジャンル取得ユースケースの呼び出し
 	value, err := h.Catalog.GetGenre(r.Context(), userID, chi.URLParam(r, "genreId"))
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// ジャンルレスポンスの書き出し
-	writeJSON(w, http.StatusOK, genreResponse(value))
+	reply(w, http.StatusOK, genreResponse(value), err)
 }
 
 // ジャンル名の変更
@@ -504,17 +483,12 @@ func (h Handler) renameGenre(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input nameRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// ジャンル改名ユースケースの呼び出し
 	value, err := h.Catalog.RenameGenre(r.Context(), userID, chi.URLParam(r, "genreId"), input.Name)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 更新レスポンスの書き出し
-	writeJSON(w, http.StatusOK, genreResponse(value))
+	reply(w, http.StatusOK, genreResponse(value), err)
 }
 
 // ジャンルの削除
@@ -522,12 +496,7 @@ func (h Handler) deleteGenre(w http.ResponseWriter, r *http.Request) {
 	// 認証ユーザーの取得
 	userID, _ := UserID(r.Context())
 	// ジャンル削除ユースケースの呼び出し
-	if err := h.Catalog.DeleteGenre(r.Context(), userID, chi.URLParam(r, "genreId")); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 削除レスポンスの書き出し
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.Catalog.DeleteGenre(r.Context(), userID, chi.URLParam(r, "genreId")))
 }
 
 // 全タスク種別一覧の取得
@@ -570,17 +539,12 @@ func (h Handler) createTaskType(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input nameRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// タスク種別作成ユースケースの呼び出し
 	value, err := h.Catalog.CreateTaskType(r.Context(), userID, input.Name)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 作成レスポンスの書き出し
-	writeJSON(w, http.StatusCreated, taskTypeResponse(value))
+	reply(w, http.StatusCreated, taskTypeResponse(value), err)
 }
 
 // タスク種別の取得
@@ -589,12 +553,7 @@ func (h Handler) getTaskType(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
 	// タスク種別取得ユースケースの呼び出し
 	value, err := h.Catalog.GetTaskType(r.Context(), userID, chi.URLParam(r, "taskTypeId"))
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// タスク種別レスポンスの書き出し
-	writeJSON(w, http.StatusOK, taskTypeResponse(value))
+	reply(w, http.StatusOK, taskTypeResponse(value), err)
 }
 
 // タスク種別名の変更
@@ -604,17 +563,12 @@ func (h Handler) renameTaskType(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input nameRequest
 	if decodeJSON(w, r, &input) != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// タスク種別改名ユースケースの呼び出し
 	value, err := h.Catalog.RenameTaskType(r.Context(), userID, chi.URLParam(r, "taskTypeId"), input.Name)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 更新レスポンスの書き出し
-	writeJSON(w, http.StatusOK, taskTypeResponse(value))
+	reply(w, http.StatusOK, taskTypeResponse(value), err)
 }
 
 // タスク種別の削除
@@ -622,12 +576,7 @@ func (h Handler) deleteTaskType(w http.ResponseWriter, r *http.Request) {
 	// 認証ユーザーの取得
 	userID, _ := UserID(r.Context())
 	// タスク種別削除ユースケースの呼び出し
-	if err := h.Catalog.DeleteTaskType(r.Context(), userID, chi.URLParam(r, "taskTypeId")); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 削除レスポンスの書き出し
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.Catalog.DeleteTaskType(r.Context(), userID, chi.URLParam(r, "taskTypeId")))
 }
 
 // ジャンルへのタスク種別紐付け
@@ -637,26 +586,17 @@ func (h Handler) attachGenreTaskType(w http.ResponseWriter, r *http.Request) {
 	// リクエストJSONのデコード
 	var input attachTaskTypeRequest
 	if decodeJSON(w, r, &input) != nil || input.TaskTypeID == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		badRequest(w)
 		return
 	}
 	// 紐付けユースケースの呼び出し
-	if err := h.Catalog.AttachGenreTaskType(r.Context(), userID, chi.URLParam(r, "genreId"), input.TaskTypeID); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	// 紐付け完了レスポンスの書き出し
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.Catalog.AttachGenreTaskType(r.Context(), userID, chi.URLParam(r, "genreId"), input.TaskTypeID))
 }
 
 // ジャンルからのタスク種別解除（使用中は禁止）
 func (h Handler) detachGenreTaskType(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserID(r.Context())
-	if err := h.Catalog.DetachGenreTaskType(r.Context(), userID, chi.URLParam(r, "genreId"), chi.URLParam(r, "taskTypeId")); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusNoContent, nil, h.Catalog.DetachGenreTaskType(r.Context(), userID, chi.URLParam(r, "genreId"), chi.URLParam(r, "taskTypeId")))
 }
 
 // ルータへのHTTP委譲
@@ -758,11 +698,7 @@ func (h Handler) getTaskTree(w http.ResponseWriter, r *http.Request) {
 	}
 	// ツリーレスポンスの書き出し（同一ジャンル全体で算出）
 	projected, err := h.projections().ProjectIDs(r.Context(), userID, []string{values[0].GenreID}, ids)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, toProjectedResponses(projected))
+	reply(w, http.StatusOK, toProjectedResponses(projected), err)
 }
 
 // タスク作成のリクエスト本体
@@ -902,4 +838,21 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// 処理結果の応答（エラーはドメインエラーへ変換。値が nil ならステータスのみ）
+func reply(w http.ResponseWriter, status int, value any, err error) {
+	switch {
+	case err != nil:
+		writeDomainError(w, err)
+	case value == nil:
+		w.WriteHeader(status)
+	default:
+		writeJSON(w, status, value)
+	}
+}
+
+// 不正リクエストの応答
+func badRequest(w http.ResponseWriter) {
+	writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 }
