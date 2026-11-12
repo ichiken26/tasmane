@@ -4,7 +4,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { useRouter } from '#imports'
 import type { ApiTask, ImpactPlan } from '../../core/composables/useCriticalData'
 import { useTasmaneApi } from '../../core/composables/useCriticalData'
-import { impactPlanFrom } from '../../core/composables/impact'
+import { deletionImpact, impactPlanFrom } from '../../core/composables/impact'
 import { apiErrorStatus } from '../../core/composables/apiError'
 import { useNotify } from '../../shared/composables/useNotify'
 
@@ -75,6 +75,8 @@ async function remove(token?: string) {
     const plan = impactPlanFrom(error)
     confirmDelete.value = false
     if (plan) {
+      // 巻き込むタスクや追加の警告がなければ、1段階目の確認で確定済みとして続行する
+      if (!token && !deletionImpact(plan, props.task.id).needsConfirmation) return await remove(plan.impactToken)
       impact.value = plan
       pending.value = { kind: 'delete' }
       return
@@ -84,6 +86,13 @@ async function remove(token?: string) {
     busy.value = false
   }
 }
+
+// 削除の2段階目では、操作対象自身を除いた「一緒に削除されるタスク」だけを一覧にする
+const shownImpact = computed<ImpactPlan | undefined>(() => {
+  if (!impact.value || pending.value?.kind !== 'delete') return impact.value
+  const view = deletionImpact(impact.value, props.task.id)
+  return { ...impact.value, affectedEntities: view.together, warnings: view.warnings }
+})
 
 // 影響確認後の操作確定
 async function confirmImpact() {
@@ -109,8 +118,9 @@ async function confirmImpact() {
     <!-- 操作影響の確認（削除の2段階目・状態伝播） -->
     <ImpactModal
       :open="Boolean(impact)"
-      :title="pending?.kind === 'delete' ? 'これらのタスクも削除されます。よろしいですか？' : '操作の影響を確認'"
-      :plan="impact"
+      :title="pending?.kind === 'delete' ? `「${task.title}」と一緒に、次のタスクも削除されます` : '操作の影響を確認'"
+      :description="pending?.kind === 'delete' ? '削除後30日以内ならゴミ箱からまとめて復元できます。キャンセルした場合は何も変更されません。' : undefined"
+      :plan="shownImpact"
       :loading="busy"
       :danger="pending?.kind === 'delete'"
       :confirm-label="pending?.kind === 'delete' ? 'すべて削除する' : '承認して続行'"

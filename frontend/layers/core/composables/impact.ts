@@ -25,3 +25,13 @@ export function impactReasonLabel(reason?: string | null): string | undefined {
   if (!reason) return undefined
   return reasonLabels[reason] ?? reason
 }
+
+// 削除確認の既定警告（APIが常に付ける文言。モーダルのタイトルと重複するため本文には出さない）
+export const DELETE_TOGETHER_WARNING = 'これらのタスクも削除されます。よろしいですか？'
+
+// 削除の影響表示（操作対象自身を除いた「一緒に削除されるタスク」と追加の警告）
+export function deletionImpact(plan: ImpactPlan, targetId: string) {
+  const together = plan.affectedEntities.filter(entity => entity.id !== targetId)
+  const warnings = plan.warnings.filter(warning => warning !== DELETE_TOGETHER_WARNING)
+  return { together, warnings, needsConfirmation: together.length > 0 || warnings.length > 0 }
+}

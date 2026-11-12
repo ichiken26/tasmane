@@ -4,7 +4,7 @@ import { useRouter } from '#imports'
 import type { GoogleConflict, GoogleImportCandidate, GoogleResolution, GoogleSnapshot, GoogleStatus, ImpactPlan } from '../../core/composables/useCriticalData'
 import { useTasmaneApi } from '../../core/composables/useCriticalData'
 import { apiErrorStatus } from '../../core/composables/apiError'
-import { impactPlanFrom } from '../../core/composables/impact'
+import { deletionImpact, impactPlanFrom } from '../../core/composables/impact'
 import { formatDate } from '../../core/composables/dates'
 import { useGenreList } from '../../core/composables/useGenreList'
 import { useNotify } from '../../shared/composables/useNotify'
@@ -25,6 +25,12 @@ const importGenre = ref<Record<string, string>>({})
 // 「タスマネ削除」は通常の削除（2段階確認）を通す
 const deleting = ref<GoogleConflict>()
 const deleteImpact = ref<ImpactPlan>()
+
+// 削除確認の表示（操作対象自身は一覧から外し、名前として別に示す）
+const deleteView = computed(() => deleteImpact.value && deleting.value ? deletionImpact(deleteImpact.value, deleting.value.taskId) : undefined)
+const shownDeleteImpact = computed<ImpactPlan | undefined>(() => deleteImpact.value && deleteView.value
+  ? { ...deleteImpact.value, affectedEntities: deleteView.value.together, warnings: deleteView.value.warnings }
+  : undefined)
 
 const genreItems = computed(() => genres.value.map(genre => ({ label: genre.name, value: genre.id })))
 const codeLabel: Record<string, string> = {
@@ -215,11 +221,14 @@ async function importCandidate(item: GoogleImportCandidate) {
     <!-- タスマネ削除の影響確認（2段階目） -->
     <ImpactModal
       :open="Boolean(deleteImpact)"
-      title="これらのタスクも削除されます。よろしいですか？"
-      :plan="deleteImpact"
+      :title="deleteView?.together.length ? 'このタスクと一緒に、次のタスクも削除されます' : 'このタスクを削除しますか？'"
+      description="削除後30日以内ならゴミ箱から復元できます。キャンセルした場合は何も変更されません。"
+      :target="deleting?.taskTitle"
+      :list-label="deleteView?.together.length ? '一緒に削除されるタスク' : undefined"
+      :plan="shownDeleteImpact"
       :loading="Boolean(busyKey)"
       danger
-      confirm-label="すべて削除する"
+      :confirm-label="deleteView?.together.length ? 'すべて削除する' : '削除する'"
       @cancel="deleteImpact = undefined; deleting = undefined"
       @confirm="deleting && removeTask(deleting, deleteImpact?.impactToken)"
     />

@@ -6,7 +6,8 @@ import type { ImpactPlan } from '../../core/composables/useCriticalData'
 import { impactReasonLabel } from '../../core/composables/impact'
 
 // Domainが返したImpact Planを表示し、承認時のみ再送する（Frontendで影響範囲を推測しない）
-const props = withDefaults(defineProps<{ open: boolean; title: string; impacts?: string[]; plan?: ImpactPlan; loading?: boolean; confirmLabel?: string; danger?: boolean }>(), { impacts: () => [], plan: undefined, confirmLabel: '承認して続行' })
+// target: 操作対象のタスク名（一覧とは分けて表示）、listLabel: 一覧の見出し
+const props = withDefaults(defineProps<{ open: boolean; title: string; description?: string; target?: string; listLabel?: string; impacts?: string[]; plan?: ImpactPlan; loading?: boolean; confirmLabel?: string; danger?: boolean }>(), { impacts: () => [], plan: undefined, description: '変更による影響範囲を確認してください。キャンセルした場合は何も変更されません。', target: undefined, listLabel: undefined, confirmLabel: '承認して続行' })
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const typeLabel = (type: string) => ({ task: 'タスク', dependency: '依存関係', genre: 'ジャンル', confirmation: '確認事項' } as Record<string, string>)[type.toLowerCase()] || type
 // 閉じる操作はキャンセル扱い
@@ -15,10 +16,12 @@ function onOpenChange(value: boolean) { if (!value && !props.loading) emit('canc
 
 <template>
   <!-- 影響確認モーダル -->
-  <UModal :open="open" :title="title" description="変更による影響範囲を確認してください。キャンセルした場合は何も変更されません。" :content="alertContent" :close="false" @update:open="onOpenChange">
+  <UModal :open="open" :title="title" :description="description" :content="alertContent" :close="false" @update:open="onOpenChange">
     <template #body>
       <div class="space-y-4">
+        <p v-if="target" class="rounded-lg bg-(--ui-bg-muted) px-3 py-2 font-medium text-(--ui-text-highlighted)">{{ target }}</p>
         <UAlert v-for="warning in plan?.warnings || []" :key="warning" color="warning" variant="subtle" icon="i-lucide-triangle-alert" :title="warning" />
+        <p v-if="listLabel && plan?.affectedEntities.length" class="text-sm font-medium text-(--ui-text-highlighted)">{{ listLabel }}</p>
         <ul v-if="plan?.affectedEntities.length" class="max-h-72 divide-y divide-(--ui-border) overflow-y-auto rounded-lg border border-(--ui-border)">
           <li v-for="entity in plan.affectedEntities" :key="`${entity.type}:${entity.id}`" class="flex items-start gap-3 px-3 py-2.5 text-sm">
             <UBadge :label="typeLabel(entity.type)" color="neutral" variant="subtle" size="sm" class="mt-0.5 shrink-0" />
