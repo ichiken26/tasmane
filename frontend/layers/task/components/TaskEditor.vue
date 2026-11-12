@@ -39,6 +39,8 @@ const createdTask = ref<ApiTask>()
 type LinkedMemo = MemoLinkDraft & { id?: string }
 const { enabled: memoEnabled, setEnabled: setMemoEnabled, ensureLoaded: loadMemoSetting, memoOrigin, openedMemo, openMemo, closeMemo, savedMemo } = useMemoIntegration()
 const memoLinks = ref<LinkedMemo[]>([])
+// 既存タスクの紐付けを読み込み中か
+const memoLinksLoading = ref(Boolean(props.task))
 const memoTab = ref<'app' | 'text'>('app')
 const composerOpen = ref(!props.task)
 const composerKey = ref(0)
@@ -113,14 +115,17 @@ async function removeMemoLink(link: LinkedMemo) {
 watch(savedMemo, (value) => {
   if (value && memoLinks.value.some(item => item.url === value.url)) void persistMemoLink({ url: value.url, title: value.title })
 })
-onMounted(async () => {
-  await loadMemoSetting()
-  if (!props.task) return
-  try { memoLinks.value = await api.memoLinks(props.task.id) }
+// 連携設定と紐付けを並行して読み込む（紐付けは読み込み中の表示つき）
+async function loadMemoLinks(taskId: string) {
+  try { memoLinks.value = await api.memoLinks(taskId) }
   catch (error) {
     notify.error(error, 'メモ一覧を取得できませんでした。')
     errorMessage.value = 'メモ一覧を取得できませんでした。再読み込みするか、Go APIのデプロイ状況を確認してください。'
   }
+  finally { memoLinksLoading.value = false }
+}
+onMounted(async () => {
+  await Promise.all([loadMemoSetting(), props.task ? loadMemoLinks(props.task.id) : undefined])
 })
 
 // フォーム初期値
@@ -374,7 +379,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('beforeunload', beforeUnloa
         </div>
         <div class="space-y-3">
           <!-- 紐付けたメモ（クリックで右側に表示・Ctrl+クリックで別タブ） -->
-          <MemoLinkChips :links="memoLinks" :active-url="openedMemo?.url" removable @open="openMemo" @remove="removeMemoLink" />
+          <MemoLinkChips :links="memoLinks" :loading="memoLinksLoading" :active-url="openedMemo?.url" removable @open="openMemo" @remove="removeMemoLink" />
           <template v-if="memoEnabled && newMemoSrc">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <UTabs v-model="memoTab" :items="memoTabs" :content="false" variant="link" size="sm" />

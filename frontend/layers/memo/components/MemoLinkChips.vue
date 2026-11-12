@@ -5,7 +5,8 @@ import type { MemoLinkDraft } from '../composables/memoBridge'
 // 紐付けたメモのリンクチップ
 // - クリック: アプリ内（右側パネル）で表示
 // - Ctrl/⌘/Shift/中クリック: ブラウザ標準どおり別タブ
-const props = defineProps<{ links: MemoLinkDraft[]; activeUrl?: string | null; removable?: boolean }>()
+// loading: 紐付けの読み込み中（チップの位置にスピナーを表示）
+const props = defineProps<{ links: MemoLinkDraft[]; activeUrl?: string | null; removable?: boolean; loading?: boolean }>()
 const emit = defineEmits<{ open: [link: MemoLinkDraft]; remove: [link: MemoLinkDraft] }>()
 
 function onClick(event: MouseEvent, link: MemoLinkDraft) {
@@ -16,7 +17,10 @@ function onClick(event: MouseEvent, link: MemoLinkDraft) {
 </script>
 
 <template>
-  <ul v-if="props.links.length" class="flex flex-wrap gap-2" aria-label="紐付けたメモ">
+  <p v-if="props.loading" role="status" aria-live="polite" class="flex h-8 items-center gap-2 text-sm text-(--ui-text-muted)">
+    <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" aria-hidden="true" />紐付けたメモを読み込んでいます…
+  </p>
+  <ul v-else-if="props.links.length" class="flex flex-wrap gap-2" aria-label="紐付けたメモ">
     <li v-for="link in props.links" :key="link.url">
       <span
         class="inline-flex max-w-72 items-center gap-1 rounded-full border py-1 ps-2.5 pe-1 text-sm transition-colors"
