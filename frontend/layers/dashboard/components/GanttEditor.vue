@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ApiTask, ImpactPlan } from '../../core/composables/useCriticalData'
 import { useTasmaneApi } from '../../core/composables/useCriticalData'
 import { impactPlanFrom } from '../../core/composables/impact'
-import { barGeometry, dragDates, ganttRange, type GanttDragMode } from '../../core/composables/gantt'
+import { barGeometry, createKeyNudge, dragDates, ganttRange, type GanttDragMode } from '../../core/composables/gantt'
 import { dayDiff, formatDate } from '../../core/composables/dates'
 import { useNotify } from '../../shared/composables/useNotify'
 
@@ -62,10 +62,18 @@ const months = computed(() => {
 const todayOffset = computed(() => dayDiff(range.value.start, new Date()))
 const isWeekend = (date: Date) => date.getDay() === 0 || date.getDay() === 6
 
-// バー位置（ドラッグ中はプレビュー）
+// バー位置（ドラッグ中・キー操作の保存待ちはプレビュー）
 function geometry(task: ApiTask) {
-  const dates = drag.value?.task.id === task.id && drag.value.delta ? dragDates(task, drag.value.mode, drag.value.delta) : task
+  const keyed = keyPreview.value?.id === task.id ? keyPreview.value.days : 0
+  const dates = drag.value?.task.id === task.id && drag.value.delta ? dragDates(task, drag.value.mode, drag.value.delta)
+    : keyed ? dragDates(task, 'end', keyed) : task
   return barGeometry(dates, range.value.start) ?? { offset: 0, span: 1 }
+}
+// 変更中の日数表示（ドラッグ中 / キー操作の保存待ち）
+function badge(task: ApiTask) {
+  const days = drag.value?.task.id === task.id ? drag.value.delta : keyPreview.value?.id === task.id ? keyPreview.value.days : 0
+  if (!days) return ''
+  return `${drag.value?.task.id === task.id ? '' : '期限 '}${days > 0 ? '+' : ''}${days}日`
 }
 const barColor = (task: ApiTask) => task.isOverdue ? 'bg-(--ui-error)' : task.status === 'COMPLETED' ? 'bg-(--ui-success)' : task.status === 'IN_PROGRESS' ? 'bg-(--ui-primary)' : 'bg-(--ui-text-dimmed)'
 
@@ -85,13 +93,22 @@ async function finish() {
   drag.value = undefined
 }
 
-// キーボード操作（←→: 移動 / Shift: 期限 / Alt: 開始）
+// キーボード操作（←→: 期限だけを1日ずつ。保存は最後の操作から3秒後にまとめて1回）
+const keyPreview = ref<{ id: string; days: number }>()
+const nudge = createKeyNudge((id, days) => {
+  keyPreview.value = undefined
+  const task = props.tasks.find(item => item.id === id)
+  if (task) void shift(task, 'end', days)
+})
 function onKey(event: KeyboardEvent, task: ApiTask) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
-  const mode: GanttDragMode = event.shiftKey ? 'end' : event.altKey ? 'start' : 'move'
-  void shift(task, mode, event.key === 'ArrowLeft' ? -1 : 1)
+  if (savingId.value) return
+  nudge.press(task.id, event.key === 'ArrowLeft' ? -1 : 1)
+  keyPreview.value = { id: task.id, days: nudge.delta(task.id) }
 }
+// 画面を離れるときは保存待ちの変更をすぐ送る
+onBeforeUnmount(() => nudge.flush())
 
 // 日付変更の送信と影響確認
 async function shift(task: ApiTask, mode: GanttDragMode, delta: number, token?: string) {
@@ -136,7 +153,7 @@ onMounted(async () => {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 class="flex items-center gap-2 font-semibold text-(--ui-text-highlighted)"><UIcon name="i-lucide-gantt-chart" class="size-5 text-(--ui-text-muted)" />Gantt</h2>
-          <p class="text-xs text-(--ui-text-muted)">バーをドラッグで移動、左右の端で開始/期限を変更。キーボード: <UKbd value="←" /><UKbd value="→" /> 移動、<UKbd value="shift" />+矢印で期限、<UKbd value="alt" />+矢印で開始</p>
+          <p class="text-xs text-(--ui-text-muted)">バーをドラッグで移動、左右の端で開始/期限を変更。キーボード: <UKbd value="←" /><UKbd value="→" /> で期限を1日ずつ変更（操作が止まって3秒後に保存）</p>
         </div>
         <USwitch v-model="showCompleted" label="完了済みも表示" size="sm" />
       </div>
@@ -152,11 +169,11 @@ onMounted(async () => {
           <div v-for="month in months" :key="month.label" class="truncate border-l border-(--ui-border-muted) px-2 py-1 first:border-l-0" :style="{ width: `${month.span * DAY}px` }">{{ month.label }}</div>
         </div>
         <div class="flex border-b border-(--ui-border)">
-          <div v-for="(date, index) in days" :key="index" class="py-1 text-center font-mono text-[11px] tabular-nums" :class="[index === todayOffset ? 'font-bold text-(--ui-primary)' : isWeekend(date) ? 'text-(--ui-text-dimmed)' : 'text-(--ui-text-muted)']" :style="{ width: `${DAY}px` }">{{ date.getDate() }}</div>
+          <div v-for="(date, index) in days" :key="index" class="py-1 text-center font-mono text-[13px] tabular-nums" :class="[index === todayOffset ? 'font-bold text-(--ui-primary)' : isWeekend(date) ? 'text-(--ui-text-dimmed)' : 'text-(--ui-text-muted)']" :style="{ width: `${DAY}px` }">{{ date.getDate() }}</div>
         </div>
 
         <template v-for="{ task, depth } in rows" :key="task.id">
-          <div class="sticky left-0 z-10 flex h-10 items-center gap-1.5 border-r border-b border-(--ui-border-muted) bg-(--ui-bg) pr-3 text-sm" :style="{ paddingLeft: `${16 + depth * 14}px` }">
+          <div class="sticky left-0 z-10 flex h-10 items-center gap-1.5 border-r border-b border-(--ui-border-muted) bg-(--ui-bg) pr-3 text-sm" :style="{ paddingLeft: `${18 + depth * 14}px` }">
             <UIcon v-if="depth" name="i-lucide-corner-down-right" class="size-3.5 shrink-0 text-(--ui-text-dimmed)" />
             <NuxtLink :to="`/tasks/${task.id}`" class="truncate hover:underline" :title="task.title">{{ task.title }}</NuxtLink>
             <FireMark v-if="task.showFire" />
@@ -173,8 +190,8 @@ onMounted(async () => {
               tabindex="0"
               role="button"
               aria-roledescription="Ganttバー"
-              :aria-label="`${task.title}の日程 ${formatDate(task.startAt)}〜${formatDate(task.endAt)}。矢印キーで移動`"
-              aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Alt+ArrowLeft Alt+ArrowRight"
+              :aria-label="`${task.title}の日程 ${formatDate(task.startAt)}〜${formatDate(task.endAt)}。左右の矢印キーで期限を変更`"
+              aria-keyshortcuts="ArrowLeft ArrowRight"
               @pointerdown="begin($event, task, 'move')"
               @pointermove="move"
               @pointerup="finish"
@@ -186,8 +203,8 @@ onMounted(async () => {
               <span class="relative truncate px-2.5">{{ geometry(task).span > 2 ? task.title : '' }}</span>
               <span class="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-white/30" aria-hidden="true" @pointerdown.stop="begin($event, task, 'end')" @pointermove="move" @pointerup.stop="finish" />
             </div>
-            <div v-if="drag?.task.id === task.id && drag.delta" class="pointer-events-none absolute -top-0.5 z-[3] rounded bg-(--ui-bg-inverted) px-1.5 py-0.5 text-[11px] text-(--ui-text-inverted)" :style="{ left: `${geometry(task).offset * DAY}px` }">
-              {{ drag.delta > 0 ? '+' : '' }}{{ drag.delta }}日
+            <div v-if="badge(task)" class="pointer-events-none absolute -top-0.5 z-[3] rounded bg-(--ui-bg-inverted) px-1.5 py-0.5 text-[13px] text-(--ui-text-inverted)" :style="{ left: `${geometry(task).offset * DAY}px` }">
+              {{ badge(task) }}
             </div>
           </div>
         </template>

@@ -14,6 +14,21 @@
   --font-serif: 'Instrument Serif', serif;
 }
 
+/* 文字: 各段階を一律 +2px（行の高さは比率のまま追従） */
+@theme {
+  --text-xs: calc(0.75rem + 2px); --text-sm: calc(0.875rem + 2px); --text-base: calc(1rem + 2px); --text-lg: calc(1.125rem + 2px);
+  --text-xl: calc(1.25rem + 2px); --text-2xl: calc(1.5rem + 2px); --text-3xl: calc(1.875rem + 2px); --text-4xl: calc(2.25rem + 2px);
+  --text-5xl: calc(3rem + 2px); --text-6xl: calc(3.75rem + 2px);
+}
+
+/* 余白: padding / margin / gap / space は 0 以外を一律 +2px（サイズ系の h-* w-* size-* は据え置き） */
+@theme inline {
+  --padding-0_5: calc(var(--spacing) * 0.5 + 2px); --padding-1: calc(var(--spacing) * 1 + 2px); --padding-1_5: calc(var(--spacing) * 1.5 + 2px); --padding-2: calc(var(--spacing) * 2 + 2px); --padding-2_5: calc(var(--spacing) * 2.5 + 2px); --padding-3: calc(var(--spacing) * 3 + 2px); --padding-3_5: calc(var(--spacing) * 3.5 + 2px); --padding-4: calc(var(--spacing) * 4 + 2px); --padding-4_5: calc(var(--spacing) * 4.5 + 2px); --padding-5: calc(var(--spacing) * 5 + 2px); --padding-6: calc(var(--spacing) * 6 + 2px); --padding-7: calc(var(--spacing) * 7 + 2px); --padding-8: calc(var(--spacing) * 8 + 2px); --padding-9: calc(var(--spacing) * 9 + 2px); --padding-10: calc(var(--spacing) * 10 + 2px); --padding-11: calc(var(--spacing) * 11 + 2px); --padding-12: calc(var(--spacing) * 12 + 2px); --padding-14: calc(var(--spacing) * 14 + 2px); --padding-16: calc(var(--spacing) * 16 + 2px); --padding-20: calc(var(--spacing) * 20 + 2px); --padding-24: calc(var(--spacing) * 24 + 2px);
+  --margin-0_5: calc(var(--spacing) * 0.5 + 2px); --margin-1: calc(var(--spacing) * 1 + 2px); --margin-1_5: calc(var(--spacing) * 1.5 + 2px); --margin-2: calc(var(--spacing) * 2 + 2px); --margin-2_5: calc(var(--spacing) * 2.5 + 2px); --margin-3: calc(var(--spacing) * 3 + 2px); --margin-3_5: calc(var(--spacing) * 3.5 + 2px); --margin-4: calc(var(--spacing) * 4 + 2px); --margin-4_5: calc(var(--spacing) * 4.5 + 2px); --margin-5: calc(var(--spacing) * 5 + 2px); --margin-6: calc(var(--spacing) * 6 + 2px); --margin-7: calc(var(--spacing) * 7 + 2px); --margin-8: calc(var(--spacing) * 8 + 2px); --margin-9: calc(var(--spacing) * 9 + 2px); --margin-10: calc(var(--spacing) * 10 + 2px); --margin-11: calc(var(--spacing) * 11 + 2px); --margin-12: calc(var(--spacing) * 12 + 2px); --margin-14: calc(var(--spacing) * 14 + 2px); --margin-16: calc(var(--spacing) * 16 + 2px); --margin-20: calc(var(--spacing) * 20 + 2px); --margin-24: calc(var(--spacing) * 24 + 2px);
+  --gap-0_5: calc(var(--spacing) * 0.5 + 2px); --gap-1: calc(var(--spacing) * 1 + 2px); --gap-1_5: calc(var(--spacing) * 1.5 + 2px); --gap-2: calc(var(--spacing) * 2 + 2px); --gap-2_5: calc(var(--spacing) * 2.5 + 2px); --gap-3: calc(var(--spacing) * 3 + 2px); --gap-3_5: calc(var(--spacing) * 3.5 + 2px); --gap-4: calc(var(--spacing) * 4 + 2px); --gap-4_5: calc(var(--spacing) * 4.5 + 2px); --gap-5: calc(var(--spacing) * 5 + 2px); --gap-6: calc(var(--spacing) * 6 + 2px); --gap-7: calc(var(--spacing) * 7 + 2px); --gap-8: calc(var(--spacing) * 8 + 2px); --gap-9: calc(var(--spacing) * 9 + 2px); --gap-10: calc(var(--spacing) * 10 + 2px); --gap-11: calc(var(--spacing) * 11 + 2px); --gap-12: calc(var(--spacing) * 12 + 2px); --gap-14: calc(var(--spacing) * 14 + 2px); --gap-16: calc(var(--spacing) * 16 + 2px); --gap-20: calc(var(--spacing) * 20 + 2px); --gap-24: calc(var(--spacing) * 24 + 2px);
+  --space-0_5: calc(var(--spacing) * 0.5 + 2px); --space-1: calc(var(--spacing) * 1 + 2px); --space-1_5: calc(var(--spacing) * 1.5 + 2px); --space-2: calc(var(--spacing) * 2 + 2px); --space-2_5: calc(var(--spacing) * 2.5 + 2px); --space-3: calc(var(--spacing) * 3 + 2px); --space-3_5: calc(var(--spacing) * 3.5 + 2px); --space-4: calc(var(--spacing) * 4 + 2px); --space-4_5: calc(var(--spacing) * 4.5 + 2px); --space-5: calc(var(--spacing) * 5 + 2px); --space-6: calc(var(--spacing) * 6 + 2px); --space-7: calc(var(--spacing) * 7 + 2px); --space-8: calc(var(--spacing) * 8 + 2px); --space-9: calc(var(--spacing) * 9 + 2px); --space-10: calc(var(--spacing) * 10 + 2px); --space-11: calc(var(--spacing) * 11 + 2px); --space-12: calc(var(--spacing) * 12 + 2px); --space-14: calc(var(--spacing) * 14 + 2px); --space-16: calc(var(--spacing) * 16 + 2px); --space-20: calc(var(--spacing) * 20 + 2px); --space-24: calc(var(--spacing) * 24 + 2px);
+}
+
 /* ライトモード: 暖かい紙色 */
 :root {
   --ui-radius: 0.5rem;
@@ -58,6 +73,9 @@ body { background: var(--ui-bg); color: var(--ui-text); font-family: var(--font-
 
 /* 複数のTaskに依存するTaskの強調（淡い黄色） */
 .multi-dependency { background: color-mix(in oklab, var(--ui-warning) 14%, transparent); border-left: 3px solid var(--ui-warning); }
+
+/* スクロールできるがバーは出さない領域 */
+@utility scrollbar-none { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
 
 /* フォーカスリング */
 :focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 2px; }

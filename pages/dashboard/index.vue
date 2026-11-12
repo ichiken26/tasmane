@@ -14,7 +14,6 @@ const { data, status, error, refresh } = useCriticalData('dashboard', () => api.
     <PageHeader eyebrow="All genres" title="Dashboard" description="全ジャンル横断で、今やるべきことを確認します。">
       <template #actions>
         <UButton icon="i-lucide-refresh-cw" color="neutral" variant="outline" :loading="status === 'pending'" aria-label="再読み込み" @click="refresh()" />
-        <UButton to="/tasks/new" icon="i-lucide-plus">新規タスク</UButton>
       </template>
     </PageHeader>
     <DashboardSkeleton v-if="status === 'pending' && !data" />

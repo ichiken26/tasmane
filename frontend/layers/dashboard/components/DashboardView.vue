@@ -97,9 +97,9 @@ const firstFilledSection = computed(() => deadlineGroups.value.find(group => gro
         <!-- 期限区分 -->
         <UCard :ui="{ body: 'p-0 sm:p-0' }">
           <template #header><h2 class="font-semibold text-(--ui-text-highlighted)">期限区分</h2></template>
-          <UTabs :key="firstFilledSection" :items="deadlineTabs" :default-value="firstFilledSection" variant="link" size="xs" class="w-full" :ui="{ list: 'overflow-x-auto px-2', trigger: 'shrink-0' }">
+          <UTabs :key="firstFilledSection" :items="deadlineTabs" :default-value="firstFilledSection" variant="link" size="xs" class="w-full" :ui="{ list: 'flex-wrap gap-1 px-2 py-1.5', indicator: 'hidden', trigger: 'shrink-0 rounded-md data-[state=active]:bg-(--ui-bg-elevated)' }">
             <template #content="{ item }">
-              <ul v-if="deadlineGroups.find(group => group.key === item.value)?.tasks.length" class="max-h-96 divide-y divide-(--ui-border) overflow-y-auto">
+              <ul v-if="deadlineGroups.find(group => group.key === item.value)?.tasks.length" class="divide-y divide-(--ui-border)">
                 <li v-for="task in deadlineGroups.find(group => group.key === item.value)?.tasks" :key="task.id" class="flex items-center gap-2 px-4 py-2.5 text-sm">
                   <NuxtLink :to="`/tasks/${task.id}`" class="min-w-0 flex-1 truncate hover:underline">{{ task.title }}</NuxtLink>
                   <span class="shrink-0 text-xs" :class="task.isOverdue ? 'text-(--ui-error)' : 'text-(--ui-text-muted)'">{{ relativeDeadline(task.endAt!) }}</span>

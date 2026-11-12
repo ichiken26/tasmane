@@ -85,7 +85,7 @@ const expandAll = () => { collapsed.value = new Set() }
         :aria-current="task.id === currentId ? 'page' : undefined"
         class="group flex items-center gap-2 rounded-md py-1.5 pr-2 hover:bg-(--ui-bg-muted)"
         :class="{ 'bg-(--ui-primary)/10 hover:bg-(--ui-primary)/15': task.id === currentId }"
-        :style="{ paddingLeft: `${task.depth * 20 + 4}px` }"
+        :style="{ paddingLeft: `${task.depth * 20 + 6}px` }"
       >
         <UButton
           v-if="task.hasChildren"

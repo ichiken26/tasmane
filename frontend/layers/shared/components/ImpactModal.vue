@@ -22,7 +22,7 @@ function onOpenChange(value: boolean) { if (!value && !props.loading) emit('canc
         <p v-if="target" class="rounded-lg bg-(--ui-bg-muted) px-3 py-2 font-medium text-(--ui-text-highlighted)">{{ target }}</p>
         <UAlert v-for="warning in plan?.warnings || []" :key="warning" color="warning" variant="subtle" icon="i-lucide-triangle-alert" :title="warning" />
         <p v-if="listLabel && plan?.affectedEntities.length" class="text-sm font-medium text-(--ui-text-highlighted)">{{ listLabel }}</p>
-        <ul v-if="plan?.affectedEntities.length" class="max-h-72 divide-y divide-(--ui-border) overflow-y-auto rounded-lg border border-(--ui-border)">
+        <ul v-if="plan?.affectedEntities.length" class="divide-y divide-(--ui-border) rounded-lg border border-(--ui-border)">
           <li v-for="entity in plan.affectedEntities" :key="`${entity.type}:${entity.id}`" class="flex items-start gap-3 px-3 py-2.5 text-sm">
             <UBadge :label="typeLabel(entity.type)" color="neutral" variant="subtle" size="sm" class="mt-0.5 shrink-0" />
             <div class="min-w-0">

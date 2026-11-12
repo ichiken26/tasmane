@@ -53,10 +53,10 @@ watch(() => route.query, (query) => {
 
 // 選択肢（USelectは空文字を値にできないためセンチネルで「すべて」を表現）
 const genreItems = computed(() => genres.value.map(genre => ({ label: genre.name, value: genre.id })))
-const priority = computed({ get: () => state.priority || ALL, set: (value: string) => { state.priority = value === ALL ? '' : value } })
-const deadline = computed({ get: () => state.deadline || ALL, set: (value: string) => { state.deadline = value === ALL ? '' : value } })
+const priority = computed({ get: () => state.priority || undefined, set: (value: string | undefined) => { state.priority = !value || value === ALL ? '' : value } })
+const deadline = computed({ get: () => state.deadline || undefined, set: (value: string | undefined) => { state.deadline = !value || value === ALL ? '' : value } })
 const priorityItems = [{ label: 'すべての優先度', value: ALL }, { label: '高', value: 'high' }, { label: '中', value: 'medium' }, { label: '低', value: 'low' }]
-const sort = computed({ get: () => state.sort || 'deadline', set: (value: string) => { state.sort = value === 'deadline' ? '' : value } })
+const sort = computed({ get: () => state.sort || undefined, set: (value: string | undefined) => { state.sort = !value || value === 'deadline' ? '' : value } })
 const sortItems = [{ label: '期限が近い順', value: 'deadline' }, { label: '優先度順', value: 'priority' }, { label: 'おすすめ順（TaskScore）', value: 'taskScore' }]
 const deadlineItems = [{ label: 'すべての期限', value: ALL }, { label: '期限切れ', value: 'overdue' }, { label: '今日まで', value: 'today' }, { label: '明日まで', value: 'tomorrow' }, { label: '1週間以内', value: 'week' }, { label: '1か月以内', value: 'month' }, { label: 'それ以上', value: 'later' }]
 const hasFilter = computed(() => Boolean(state.q || state.genres.length || state.priority || state.deadline))
@@ -82,9 +82,9 @@ const columns: TableColumn<ApiTask>[] = [
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
         <UInput v-model="keyword" type="search" icon="i-lucide-search" placeholder="タイトル・メモを検索" aria-label="フリーワード" size="lg" :loading="loading" autofocus />
         <USelectMenu v-model="state.genres" :items="genreItems" value-key="value" multiple placeholder="すべてのジャンル（複数はOR）" aria-label="ジャンル" size="lg" />
-        <USelect v-model="priority" :items="priorityItems" aria-label="優先度" size="lg" />
-        <USelect v-model="deadline" :items="deadlineItems" aria-label="期限" size="lg" />
-        <USelect v-model="sort" :items="sortItems" aria-label="並び順" size="lg" icon="i-lucide-arrow-up-down" />
+        <USelect v-model="priority" :items="priorityItems" placeholder="すべての優先度" aria-label="優先度" size="lg" />
+        <USelect v-model="deadline" :items="deadlineItems" placeholder="すべての期限" aria-label="期限" size="lg" />
+        <USelect v-model="sort" :items="sortItems" placeholder="期限が近い順" aria-label="並び順" size="lg" icon="i-lucide-arrow-up-down" />
       </div>
       <div class="mt-3 flex min-h-7 items-center justify-between gap-2 text-sm text-(--ui-text-muted)">
         <span role="status">{{ loading ? '検索中…' : `${results.length} 件` }}</span>

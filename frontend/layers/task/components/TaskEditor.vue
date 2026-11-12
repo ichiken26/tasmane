@@ -134,8 +134,8 @@ function initialState(task?: ApiTask) {
   const toInput = isAllDay ? toDateInput : toDateTimeInput
   return {
     title: task?.title ?? '', body: task?.body ?? '', genreId: task?.genreId ?? props.defaults.genreId ?? '',
-    parentTaskId: task?.parentTaskId ?? props.defaults.parentTaskId ?? ROOT, taskTypeId: task?.taskTypeId ?? NONE,
-    priority: task?.manualPriority ?? AUTO, startAt: toInput(task?.startAt), endAt: toInput(task?.endAt), isAllDay,
+    parentTaskId: task?.parentTaskId ?? props.defaults.parentTaskId ?? '', taskTypeId: task?.taskTypeId ?? '',
+    priority: task?.manualPriority ?? '', startAt: toInput(task?.startAt), endAt: toInput(task?.endAt), isAllDay,
   }
 }
 const form = reactive(initialState(props.task))
@@ -165,7 +165,7 @@ onMounted(async () => {
 
 // ジャンル連動の親タスクとタイプ取得
 watch(() => form.genreId, async (genreId, previous) => {
-  if (previous !== undefined && genreId !== props.task?.genreId) { form.parentTaskId = ROOT; form.taskTypeId = NONE }
+  if (previous !== undefined && genreId !== props.task?.genreId) { form.parentTaskId = ''; form.taskTypeId = '' }
   if (!genreId) { taskTypes.value = []; genreTasks.value = []; return }
   relatedLoading.value = true
   try {
@@ -257,9 +257,9 @@ async function createGenre(name: string) {
 function requestBody(token?: string): TaskInput {
   return {
     title: form.title.trim(), body: form.body || null, genreId: form.genreId,
-    taskTypeId: form.taskTypeId === NONE ? null : form.taskTypeId,
-    parentTaskId: form.parentTaskId === ROOT ? null : form.parentTaskId,
-    manualPriority: form.priority === AUTO ? null : form.priority,
+    taskTypeId: !form.taskTypeId || form.taskTypeId === NONE ? null : form.taskTypeId,
+    parentTaskId: !form.parentTaskId || form.parentTaskId === ROOT ? null : form.parentTaskId,
+    manualPriority: !form.priority || form.priority === AUTO ? null : form.priority,
     startAt: fromInputValue(form.startAt, form.isAllDay, 'start'), endAt: fromInputValue(form.endAt, form.isAllDay, 'end'),
     isAllDay: form.isAllDay, ...(token ? { impactToken: token } : {}),
   }
@@ -414,7 +414,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('beforeunload', beforeUnloa
           <USelectMenu v-model="form.genreId" :items="genreItems" value-key="value" create-item placeholder="ジャンルを選択" :search-input="{ placeholder: '検索 / 新規作成…' }" class="w-full" @create="createGenre" />
         </UFormField>
         <UFormField label="親タスク" :help="form.genreId ? 'このジャンルの階層から選択します。' : '先にジャンルを選択してください。'">
-          <USelectMenu v-model="form.parentTaskId" :items="parentItems" value-key="value" :disabled="!form.genreId" :loading="relatedLoading" :search-input="{ placeholder: 'タスク名で検索…' }" class="w-full" />
+          <USelectMenu v-model="form.parentTaskId" :items="parentItems" value-key="value" :disabled="!form.genreId" :loading="relatedLoading" placeholder="なし（Root Task）" :search-input="{ placeholder: 'タスク名で検索…' }" class="w-full" />
         </UFormField>
         <UFormField label="タスクタイプ">
           <USelectMenu
@@ -424,13 +424,14 @@ onBeforeUnmount(() => globalThis.removeEventListener('beforeunload', beforeUnloa
             :disabled="!form.genreId || creatingType"
             :loading="creatingType"
             create-item
+            placeholder="指定なし"
             :search-input="{ placeholder: '検索 / 新しいタイプ名を入力' }"
             class="w-full"
             @create="createType"
           />
         </UFormField>
         <UFormField label="優先度">
-          <USelect v-model="form.priority" :items="priorityItems" class="w-full" />
+          <USelect v-model="form.priority" :items="priorityItems" placeholder="自動（期限・進捗・依存から算出）" class="w-full" />
         </UFormField>
       </div>
 

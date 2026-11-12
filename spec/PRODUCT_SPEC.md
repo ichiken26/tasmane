@@ -270,6 +270,7 @@ Gantt:
 - バー全体Drag: start/endを同量移動
 - 左Resize: startのみ
 - 右Resize: endのみ
+- キーボード ←/→: endのみ1日ずつ（Shift/Alt修飾なし）。画面上は即時プレビューし、保存（更新API）は最後のキー操作から3秒後に累計日数で1回だけ行う。別のバーを操作したときや画面を離れるときは保存待ちを即時送信
 
 日付伝播:
 - Child.end > Parent.end: Warning後、必要なancestor endをRootまで延長
@@ -421,6 +422,11 @@ Confirmation FSM:
 - 自由入力
 - ユーザー個人のプリセット登録可能（同一ユーザーでcase-insensitive unique。削除しても既存Confirmationの確認先文字列は保持）
 - ユーザー間連携なし
+
+入力欄（タスク詳細）:
+- 1段目: 「確認先」「期限（年月日、任意）」
+- 2段目: 「確認する内容」（3行のテキストエリア、入力に応じて拡張）
+- すべて空欄から入力を始める
 
 完了済みTask:
 - 未確認Confirmationの追加・CONFIRMEDからの差し戻しは禁止（完了制約の不変条件を保つ。再開してから行う）
@@ -710,6 +716,9 @@ Sidebar:
 - Dashboard
 - Genres
 - current genre highlight
+- Headerのハンバーガーボタンで開閉（デスクトップは折りたたみ状態をCookieに保存、狭い画面はスライドメニュー）
+
+新規タスクボタンはHeaderの1か所だけ（ページ内に重複して置かない）
 
 TaskEditor:
 - create/editで共通化

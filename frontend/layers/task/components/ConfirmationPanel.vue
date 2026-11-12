@@ -111,22 +111,30 @@ async function setStatus(item: ApiConfirmation, status: string) {
     <p v-else class="px-4 py-6 text-center text-sm text-(--ui-text-muted)">確認事項はありません。誰かへの確認待ちがあれば追加しましょう。</p>
     <template #footer>
       <p v-if="completed" class="text-xs text-(--ui-text-muted)">完了済みのタスクには確認事項を追加できません。</p>
-      <form v-else class="space-y-2" @submit.prevent="add">
-        <div class="grid gap-2 sm:grid-cols-[1fr_12rem_10rem_auto]">
-          <UInput v-model="form.content" required placeholder="確認する内容" aria-label="確認する内容" />
-          <USelectMenu
-            v-model="form.targetName"
-            :items="targetItems"
-            create-item
-            placeholder="確認先（人・部署）"
-            aria-label="確認先"
-            :search-input="{ placeholder: '名前を入力 / プリセットから選択' }"
-            @create="(value: string) => { form.targetName = value.trim() }"
-          />
-          <DateField v-model="form.dueAt" aria-label="確認期限" />
+      <form v-else class="space-y-3" @submit.prevent="add">
+        <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+          <UFormField label="確認先" required>
+            <USelectMenu
+              v-model="form.targetName"
+              :items="targetItems"
+              create-item
+              placeholder="人・部署を選択 / 入力"
+              :search-input="{ placeholder: '名前を入力 / プリセットから選択' }"
+              class="w-full"
+              @create="(value: string) => { form.targetName = value.trim() }"
+            />
+          </UFormField>
+          <UFormField label="期限" help="年月日">
+            <DateField v-model="form.dueAt" aria-label="確認期限" />
+          </UFormField>
+        </div>
+        <UFormField label="確認する内容" required>
+          <UTextarea v-model="form.content" :rows="3" autoresize :maxrows="8" placeholder="何を確認するか" class="w-full" />
+        </UFormField>
+        <div class="flex flex-wrap items-center justify-end gap-3">
+          <UCheckbox v-if="form.targetName.trim() && !isPreset" v-model="savePreset" label="この確認先をプリセットに保存" size="sm" class="mr-auto" />
           <UButton type="submit" icon="i-lucide-plus" :loading="adding" :disabled="!form.content.trim() || !form.targetName.trim()" color="neutral" variant="soft">追加</UButton>
         </div>
-        <UCheckbox v-if="form.targetName.trim() && !isPreset" v-model="savePreset" label="この確認先をプリセットに保存" size="sm" />
       </form>
     </template>
   </UCard>

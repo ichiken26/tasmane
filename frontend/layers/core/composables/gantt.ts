@@ -42,3 +42,26 @@ export function dragDates(task: GanttDates, mode: GanttDragMode, days: number) {
   const next = shift(endAt ?? startAt, days)
   return { startAt, endAt: next && startAt && next < startAt ? startAt : next }
 }
+
+// キーボードでの期限変更は、最後の操作から少し待ってまとめて保存する（矢印ごとにAPIを呼ぶとロック競合が起きるため）
+export const GANTT_KEY_DELAY_MS = 3000
+export function createKeyNudge(commit: (id: string, days: number) => void, delayMs = GANTT_KEY_DELAY_MS) {
+  let current: { id: string; days: number; timer: ReturnType<typeof setTimeout> } | undefined
+  const flush = () => {
+    if (!current) return
+    const { id, days, timer } = current
+    clearTimeout(timer)
+    current = undefined
+    if (days) commit(id, days)
+  }
+  return {
+    press(id: string, step: number) {
+      if (current && current.id !== id) flush()
+      const days = (current?.days ?? 0) + step
+      if (current) clearTimeout(current.timer)
+      current = { id, days, timer: setTimeout(flush, delayMs) }
+    },
+    delta: (id: string) => current?.id === id ? current.days : 0,
+    flush,
+  }
+}

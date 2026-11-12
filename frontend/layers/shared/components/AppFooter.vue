@@ -65,7 +65,7 @@ const items = computed(() => {
 
 <template>
   <footer v-if="summary" class="sticky bottom-0 z-30 border-t border-(--ui-border) bg-(--ui-bg)/90 backdrop-blur" aria-label="進捗の概要">
-    <div class="mx-auto flex h-9 max-w-[1600px] items-center gap-4 overflow-x-auto px-4 text-xs whitespace-nowrap sm:px-6">
+    <div class="mx-auto flex h-9 max-w-[1600px] items-center gap-4 overflow-x-auto scrollbar-none px-4 text-xs whitespace-nowrap sm:px-6">
       <NuxtLink v-for="item in items" :key="item.label" :to="item.to" class="flex items-center gap-1 rounded hover:text-(--ui-text-highlighted) focus-visible:outline-2 focus-visible:outline-(--ui-primary)" :class="item.tone">
         <UIcon :name="item.icon" class="size-3.5" aria-hidden="true" />
         <span>{{ item.label }}</span>

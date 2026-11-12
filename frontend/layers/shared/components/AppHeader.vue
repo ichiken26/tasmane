@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 import { useColorMode, useRoute } from '#imports'
+import { useSidebar } from '../composables/useSidebar'
 
 interface AuthUser { email: string, name?: string, picture?: string }
 
@@ -15,6 +16,20 @@ const isDark = computed({
   get: () => colorMode.value === 'dark',
   set: (value: boolean) => { colorMode.preference = value ? 'dark' : 'light' },
 })
+
+// ハンバーガー: デスクトップ（lg以上）はサイドバーの折りたたみ、狭い画面はメニューを開く
+const sidebar = useSidebar()
+const desktop = ref(false)
+onMounted(() => {
+  const query = globalThis.matchMedia('(min-width: 1024px)')
+  desktop.value = query.matches
+  query.addEventListener('change', event => { desktop.value = event.matches })
+})
+const menuExpanded = computed(() => desktop.value ? !sidebar.collapsed.value : open.value)
+function onMenu() {
+  if (desktop.value) sidebar.toggle()
+  else open.value = true
+}
 
 // 画面遷移でモバイルメニューを閉じる
 watch(() => route.fullPath, () => { open.value = false })
@@ -57,7 +72,7 @@ async function logout(): Promise<void> {
   <!-- グローバルヘッダー -->
   <header class="sticky top-0 z-40 h-16 border-b border-(--ui-border) bg-(--ui-bg)/85 backdrop-blur">
     <div class="mx-auto flex h-full max-w-[1600px] items-center gap-3 px-4 sm:px-6">
-      <UButton class="lg:hidden" icon="i-lucide-menu" color="neutral" variant="ghost" aria-label="メニューを開く" :aria-expanded="open" aria-controls="mobile-nav" @click="open = true" />
+      <UButton icon="i-lucide-menu" color="neutral" variant="ghost" :aria-label="desktop ? (menuExpanded ? 'サイドバーを折りたたむ' : 'サイドバーを開く') : 'メニューを開く'" :aria-expanded="menuExpanded" :aria-controls="desktop ? 'desktop-sidebar' : 'mobile-nav'" @click="onMenu" />
       <NuxtLink to="/" class="flex items-center gap-2 font-semibold text-(--ui-text-highlighted)" aria-label="タスマネ トップ">
         <AppLogo class="size-8" />
         <span class="text-lg tracking-tight">タスマネ</span>
