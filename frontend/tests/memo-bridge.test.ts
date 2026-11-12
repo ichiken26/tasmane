@@ -45,7 +45,7 @@ describe('memo app bridge', () => {
   // 作成後に一部の紐付けが失敗しても、成功済みは再送せず未保存だけ再試行する
   it('retries failed task memo links without duplicating the created task or stored links', async () => {
     const { persistPendingMemoLinks } = await import('../layers/memo/composables/memoBridge')
-    const drafts = [
+    const drafts: Array<{ url: string; title: string; id?: string }> = [
       { url: 'https://memo.kokage-studio.com/memo/a', title: 'A' },
       { url: 'https://memo.kokage-studio.com/memo/b', title: 'B' },
     ]
